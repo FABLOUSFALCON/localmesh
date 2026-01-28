@@ -1,0 +1,56 @@
+# Binaries
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+localmesh
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LocalMesh data
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Keys (never commit)
+*.key
+*.pem
+*.crt
+
+# Config (local overrides)
+localmesh.yaml
+policies.yaml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+
+# Snapshots
+snapshots/

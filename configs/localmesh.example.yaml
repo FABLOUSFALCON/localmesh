@@ -1,0 +1,115 @@
+# LocalMesh Configuration
+# Copy this to localmesh.yaml and customize
+
+# Node configuration
+node:
+  id: ""  # Auto-generated if empty
+  name: "main-gateway"
+  role: gateway  # gateway or worker
+  zone: general  # Default zone
+
+# Gateway configuration
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+  domain: "localmesh.local"  # mDNS domain
+  tls_enabled: false
+  tls_cert_file: ""
+  tls_key_file: ""
+  read_timeout: 30   # seconds
+  write_timeout: 30  # seconds
+
+# Authentication configuration
+auth:
+  token_ttl: 3600           # 1 hour
+  refresh_token_ttl: 86400  # 24 hours
+  allowed_audiences:
+    - "localmesh"
+  require_location: true    # Require network location verification
+  secret_key_file: "data/keys/auth.key"
+
+# Network zones
+# Zones define network-based access control
+zones:
+  - id: general
+    name: "General Campus"
+    description: "Accessible from any campus WiFi"
+    ssids:
+      - "CAMPUS-WIFI"
+      - "CAMPUS-GUEST"
+    ip_ranges:
+      - "10.0.0.0/8"
+      - "192.168.0.0/16"
+
+  - id: cs-department
+    name: "CS Department"
+    description: "Computer Science department only"
+    ssids:
+      - "CS-DEPT-WIFI"
+      - "CS-LAB-WIFI"
+    ip_ranges:
+      - "10.10.0.0/16"
+    parent: general  # Inherits from general
+
+  - id: mech-department
+    name: "Mechanical Department"
+    description: "Mechanical Engineering department only"
+    ssids:
+      - "MECH-DEPT-WIFI"
+    ip_ranges:
+      - "10.20.0.0/16"
+    parent: general
+
+  - id: civil-department
+    name: "Civil Department"
+    description: "Civil Engineering department only"
+    ssids:
+      - "CIVIL-DEPT-WIFI"
+    ip_ranges:
+      - "10.30.0.0/16"
+    parent: general
+
+# Storage configuration
+storage:
+  data_dir: "./data"
+  engine: sqlite  # sqlite or badger
+  max_open_conns: 10
+
+# Cloud sync configuration
+sync:
+  enabled: false
+  provider: s3     # s3, gcs, or local
+  endpoint: ""     # S3-compatible endpoint (leave empty for AWS)
+  bucket: ""
+  interval: 60     # Sync every 60 minutes
+  encrypt: true    # Encrypt before upload
+  key_file: "data/keys/sync.key"
+
+# Plugin configuration
+plugins:
+  attendance:
+    enabled: true
+    config:
+      allowed_zones:
+        - cs-department
+        - mech-department
+        - civil-department
+      session_duration: 3600  # 1 hour
+      require_department_wifi: true
+
+  lecture:
+    enabled: true
+    config:
+      allowed_zones:
+        - general
+      max_connections: 500
+      recording_enabled: true
+
+  notices:
+    enabled: true
+    config:
+      allowed_zones:
+        - general
+      post_roles:
+        - admin
+        - faculty

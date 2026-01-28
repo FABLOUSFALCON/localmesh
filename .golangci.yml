@@ -1,0 +1,172 @@
+# LocalMesh - golangci-lint configuration
+# Security-focused, strict linting
+
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  modules-download-mode: readonly
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters:
+  enable-all: false
+  disable-all: true
+  enable:
+    # Default linters
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # Security linters (CRITICAL)
+    - gosec          # Security issues
+    - bodyclose      # HTTP response body close
+    - noctx          # HTTP requests without context
+
+    # Error handling
+    - errorlint      # Error wrapping issues
+    - wrapcheck      # Error wrapping in public functions
+
+    # Code quality
+    - gocyclo        # Cyclomatic complexity
+    - gocognit       # Cognitive complexity
+    - dupl           # Code duplication
+    - funlen         # Function length
+    - gochecknoinits # No init functions
+    - goconst        # Repeated strings to constants
+    - gocritic       # Opinionated linter
+    - gofmt          # Formatting
+    - goimports      # Import organization
+    - revive         # Fast, extensible linter
+    - unconvert      # Unnecessary conversions
+    - unparam        # Unused function parameters
+    - nakedret       # Naked returns in functions
+    - prealloc       # Slice preallocation
+    - exportloopref  # Loop variable capture
+    - nilerr         # nil error returns
+    - nilnil         # nil,nil returns
+    - tenv           # os.Setenv in tests
+    - testpackage    # Separate test packages
+    - tparallel      # Test parallelization
+    - wastedassign   # Wasted assignments
+    - whitespace     # Whitespace issues
+
+    # SQL safety
+    - rowserrcheck   # sql.Rows.Err() checks
+    - sqlclosecheck  # sql.Rows.Close() calls
+
+    # Performance
+    - bodyclose
+    - prealloc
+
+linters-settings:
+  gosec:
+    excludes: []  # Don't exclude any security checks
+    config:
+      G101:
+        # Detect hardcoded credentials
+        pattern: "(?i)(passwd|pass|password|pwd|secret|token|apikey|api_key|access_key)"
+      G306:
+        # Ensure secure file permissions
+        "1": "0600"
+
+  gocyclo:
+    min-complexity: 15
+
+  gocognit:
+    min-complexity: 20
+
+  funlen:
+    lines: 80
+    statements: 50
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - whyNoLint
+      - hugeParam  # Sometimes needed for value semantics
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+
+  wrapcheck:
+    ignoreSigs:
+      - .Errorf(
+      - errors.New(
+      - errors.Unwrap(
+      - errors.Join(
+      - .Wrap(
+      - .Wrapf(
+      - .WithMessage(
+      - .WithMessagef(
+      - .WithStack(
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
+
+  exclude-rules:
+    # Test files can have more relaxed rules
+    - path: _test\.go
+      linters:
+        - funlen
+        - gocyclo
+        - gocognit
+        - dupl
+        - wrapcheck
+
+    # Main files
+    - path: cmd/
+      linters:
+        - gochecknoinits
+
+severity:
+  default-severity: error
+  case-sensitive: false
+  rules:
+    - linters:
+        - gosec
+      severity: error  # Security issues are always errors

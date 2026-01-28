@@ -1,0 +1,134 @@
+# Security Policy Configuration
+# Defines fine-grained access control policies
+
+# Role definitions
+roles:
+  student:
+    description: "Regular student"
+    permissions:
+      - attendance:view
+      - attendance:mark
+      - lecture:view
+      - notices:view
+
+  faculty:
+    description: "Faculty member"
+    permissions:
+      - attendance:*
+      - lecture:*
+      - notices:*
+
+  admin:
+    description: "System administrator"
+    permissions:
+      - "*"
+
+# Zone-based policies
+# These define what can be accessed from which zones
+zone_policies:
+  # General campus - basic access
+  general:
+    allowed_plugins:
+      - lecture
+      - notices
+    denied_plugins: []
+    rate_limit: 100  # requests per minute
+
+  # CS Department - full access
+  cs-department:
+    allowed_plugins:
+      - attendance
+      - lecture
+      - notices
+    required_roles: []  # Any authenticated user
+    rate_limit: 200
+
+  # Other departments follow same pattern
+  mech-department:
+    allowed_plugins:
+      - attendance
+      - lecture
+      - notices
+    rate_limit: 200
+
+  civil-department:
+    allowed_plugins:
+      - attendance
+      - lecture
+      - notices
+    rate_limit: 200
+
+# Service-specific policies
+service_policies:
+  attendance:
+    # Only allow attendance marking during class hours
+    time_restrictions:
+      enabled: true
+      allowed_hours: "08:00-18:00"
+      allowed_days:
+        - monday
+        - tuesday
+        - wednesday
+        - thursday
+        - friday
+    
+    # Require specific zone for marking
+    require_department_zone: true
+    
+    # Rate limiting
+    rate_limit:
+      mark: 1      # 1 mark per minute (prevent spam)
+      view: 60     # 60 views per minute
+
+  lecture:
+    # Maximum concurrent viewers
+    max_connections: 500
+    
+    # Rate limiting
+    rate_limit:
+      view: 100
+      broadcast: 10  # For faculty
+
+  notices:
+    # Who can post
+    post_allowed_roles:
+      - admin
+      - faculty
+    
+    # Rate limiting
+    rate_limit:
+      view: 100
+      post: 5
+
+# IP-based restrictions
+ip_policies:
+  # Block known bad actors
+  blocklist: []
+  
+  # Allow only campus IPs
+  allowlist_enabled: true
+  allowlist:
+    - 10.0.0.0/8
+    - 192.168.0.0/16
+    - 172.16.0.0/12
+
+# Security settings
+security:
+  # Token settings
+  token:
+    algorithm: "paseto-v4"  # PASETO v4 (recommended) or jwt
+    issuer: "localmesh"
+    
+  # Request validation
+  request:
+    max_body_size: 10485760  # 10MB
+    timeout: 30              # seconds
+    
+  # Headers
+  headers:
+    # Security headers to add to responses
+    strict_transport_security: "max-age=31536000; includeSubDomains"
+    content_security_policy: "default-src 'self'"
+    x_content_type_options: "nosniff"
+    x_frame_options: "DENY"
+    referrer_policy: "strict-origin-when-cross-origin"
