@@ -17,11 +17,20 @@ type Service struct {
 	// Version is the service version
 	Version string `json:"version"`
 
+	// NodeID is the ID of the node hosting this service
+	NodeID string `json:"node_id"`
+
+	// Endpoint is the full URL/path to reach this service
+	Endpoint string `json:"endpoint"`
+
 	// Host is the hostname or IP where the service runs
 	Host string `json:"host"`
 
 	// Port is the port the service listens on
 	Port int `json:"port"`
+
+	// Zone is the network zone this service is in
+	Zone string `json:"zone"`
 
 	// Zones are the network zones this service is accessible from
 	Zones []string `json:"zones"`
