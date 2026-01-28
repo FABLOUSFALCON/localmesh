@@ -472,49 +472,151 @@ localmesh plugin scaffold <name>  # Generate plugin boilerplate
 
 ---
 
-## 📅 Development Phases
+## 📅 Development Phases & Progress Tracker
+
+> **Legend:** ✅ Complete | 🔄 In Progress | ⏳ Pending
 
 ### Phase 1: Foundation (Weeks 1-3)
-- [ ] Project scaffolding & tooling setup
-- [ ] Core configuration system
-- [ ] Basic CLI structure (cobra)
-- [ ] Logging & error handling patterns
-- [ ] mDNS discovery implementation
-- [ ] Service registry (in-memory)
-- [ ] Basic HTTP gateway
+
+| Status | Task | Notes |
+|:------:|------|-------|
+| ✅ | Project scaffolding & directory structure | Done - all dirs created |
+| ✅ | Go module initialization | `github.com/FABLOUSFALCON/localmesh` |
+| ✅ | golangci-lint security config | `.golangci.yml` with 30+ linters |
+| ✅ | Makefile with build/test/lint targets | Complete |
+| ✅ | Basic CLI structure (cobra) | Commands: init, start, stop, status, plugin, network, sync, auth |
+| ✅ | Plugin SDK interface definition | `pkg/sdk/plugin.go` |
+| ✅ | Shared types package | `pkg/types/types.go` |
+| ✅ | Core configuration system (viper) | `internal/config/config.go` |
+| ✅ | Logging & error handling patterns (slog) | Integrated throughout |
+| ✅ | mDNS discovery implementation | `internal/mesh/discovery.go` - working! |
+| ✅ | Service registry (in-memory + persisted) | `internal/registry/registry.go` |
+| ✅ | Basic HTTP gateway | `internal/gateway/router.go` with middleware |
+| ✅ | **Interactive TUI dashboard** | Bubble Tea + Lip Gloss |
+| ✅ | SQLite storage (pure Go) | `internal/storage/sqlite.go` - WAL mode, 64MB cache |
+| ✅ | Badger KV store | `internal/storage/badger.go` - sessions, tokens |
 
 ### Phase 2: Security Core (Weeks 4-5)
-- [ ] Network identity detection
-- [ ] PASETO token generation & validation
-- [ ] Zone-based access control
-- [ ] Policy engine
-- [ ] Crypto key management
+
+| Status | Task | Notes |
+|:------:|------|-------|
+| ✅ | PASETO token generation & validation | v2 tokens with Ed25519 |
+| ✅ | Zone-based access control | `internal/auth/zones.go` |
+| ✅ | Crypto key management | Ed25519 keys auto-generated |
+| ✅ | Rate limiting middleware | Per-IP, per-user with burst |
+| ✅ | Auth middleware & handlers | Login, refresh, logout, sessions |
+| ✅ | Argon2id password hashing | OWASP recommended params |
+| ✅ | Session management | Max sessions, auto-expiry |
+| ✅ | **Network identity detection** | WiFi SSID→Zone, BSSID, subnet detection |
+| ✅ | **Network identity API** | `/api/v1/network/identity`, mappings, verify |
+| ✅ | **Security headers middleware** | CSP, HSTS, X-Frame-Options, etc. |
 
 ### Phase 3: Plugin System (Weeks 6-7)
-- [ ] Plugin interface definition
-- [ ] Plugin loader & lifecycle
-- [ ] Plugin isolation & resource limits
-- [ ] Plugin storage abstraction
-- [ ] Plugin scaffold generator
+
+| Status | Task | Notes |
+|:------:|------|-------|
+| ✅ | Plugin interface definition | `sdk.Plugin` interface |
+| ✅ | **Plugin loader & lifecycle** | Load, init, start, stop |
+| ✅ | **Plugin route registration** | Mount at `/plugins/{name}/` |
+| ⏳ | Plugin storage abstraction | Isolated KV per plugin |
+| ⏳ | Plugin scaffold generator | `localmesh plugin scaffold` |
+| ⏳ | Plugin hot-reload (dev mode) | Optional |
 
 ### Phase 4: Storage & Sync (Weeks 8-9)
-- [ ] SQLite integration with migrations
-- [ ] Badger KV for hot data
-- [ ] Snapshot system
-- [ ] S3/GCS sync providers
-- [ ] Restore functionality
+
+| Status | Task | Notes |
+|:------:|------|-------|
+| ✅ | SQLite integration | modernc.org/sqlite (pure Go) |
+| ✅ | Database migrations system | Auto-creates tables |
+| ✅ | Badger KV for hot data | Sessions, tokens, cache |
+| ⏳ | Snapshot system | Point-in-time backups |
+| ⏳ | S3/GCS sync providers | Cloud backup |
+| ⏳ | Restore functionality | `localmesh restore` |
 
 ### Phase 5: Demo Plugins (Weeks 10-11)
-- [ ] Attendance plugin
-- [ ] Live lecture plugin
-- [ ] Notice board plugin
-- [ ] Plugin documentation
+
+| Status | Task | Notes |
+|:------:|------|-------|
+| ✅ | **Attendance plugin** | Zone-based attendance, sessions, records |
+| ⏳ | Live lecture plugin | WebSocket broadcast |
+| ⏳ | Notice board plugin | Real-time updates |
+| ⏳ | Plugin documentation | Examples, API docs |
 
 ### Phase 6: Polish & Security Audit (Week 12)
-- [ ] Security audit & fixes
-- [ ] Performance optimization
-- [ ] Documentation completion
-- [ ] Demo video & presentation
+
+| Status | Task | Notes |
+|:------:|------|-------|
+| ⏳ | Security audit & fixes | govulncheck, gosec |
+| ⏳ | Performance optimization | Benchmarks |
+| ⏳ | Documentation completion | |
+| ⏳ | Demo video & presentation | For submission |
+
+---
+
+## 🖥️ Interactive TUI Dashboard
+
+We're building a **btop-like** interactive terminal UI using Bubble Tea + Lip Gloss.
+
+### TUI Features
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  LocalMesh Dashboard                                    v1.0.0  │ 🟢 Online │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─ Services ────────────────────────┐  ┌─ Network Zones ───────────────┐  │
+│  │                                   │  │                               │  │
+│  │  🟢 attendance    10.0.1.5:8081  │  │  📍 general        12 clients │  │
+│  │  🟢 lecture       10.0.1.5:8082  │  │  📍 cs-department   8 clients │  │
+│  │  🟡 notices       10.0.1.6:8083  │  │  📍 mech-dept       3 clients │  │
+│  │                                   │  │                               │  │
+│  └───────────────────────────────────┘  └───────────────────────────────┘  │
+│                                                                             │
+│  ┌─ Nodes ───────────────────────────┐  ┌─ Quick Actions ───────────────┐  │
+│  │                                   │  │                               │  │
+│  │  🖥️  main-gateway   10.0.1.5     │  │  [s] Start service            │  │
+│  │  🖥️  cs-node-01     10.0.1.6     │  │  [p] Manage plugins           │  │
+│  │  ⚫ mech-node-01   offline       │  │  [l] View logs                │  │
+│  │                                   │  │  [c] Configuration            │  │
+│  └───────────────────────────────────┘  │  [q] Quit                     │  │
+│                                         └───────────────────────────────┘  │
+│                                                                             │
+│  ┌─ Recent Activity ────────────────────────────────────────────────────┐  │
+│  │  19:32:45  attendance  Student marked present (CS101)                │  │
+│  │  19:32:41  lecture     New session started: "Data Structures"        │  │
+│  │  19:32:38  gateway     Node cs-node-01 joined the mesh               │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  CPU: ▓▓▓▓▓░░░░░ 48%   MEM: ▓▓▓▓▓▓▓░░░ 72%   SYNC: Last 5m ago          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### TUI Technology Stack
+
+| Package | Purpose |
+|---------|---------|
+| [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) | TUI framework (Elm architecture) |
+| [charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss) | Styling (colors, borders, layout) |
+| [charmbracelet/bubbles](https://github.com/charmbracelet/bubbles) | Pre-built components (tables, spinners, etc.) |
+| [charmbracelet/log](https://github.com/charmbracelet/log) | Beautiful logging |
+
+### TUI Views/Screens
+
+1. **Dashboard** (default) - Overview of everything
+2. **Services** - Detailed service list, start/stop/restart
+3. **Plugins** - Install, enable, disable, configure
+4. **Logs** - Real-time log viewer with filtering
+5. **Network** - Node discovery, zone visualization
+6. **Config** - Edit configuration interactively
+7. **Sync** - Cloud sync status, trigger backup/restore
+
+### Example Projects for Inspiration
+
+- [btop](https://github.com/aristocratos/btop) - System monitor
+- [lazygit](https://github.com/jesseduffield/lazygit) - Git TUI
+- [k9s](https://github.com/derailed/k9s) - Kubernetes TUI
+- [glow](https://github.com/charmbracelet/glow) - Markdown reader
+- [soft-serve](https://github.com/charmbracelet/soft-serve) - Git server TUI
 
 ---
 
@@ -600,13 +702,115 @@ Before any merge:
 
 ## 💡 Future Ideas (Post-MVP)
 
-- [ ] TUI dashboard using bubbletea
+- [ ] TUI dashboard using bubbletea *(Moved to Phase 1!)*
 - [ ] Prometheus metrics export
 - [ ] OpenTelemetry tracing
 - [ ] Plugin marketplace
 - [ ] Mobile SDK (Go → gomobile)
 - [ ] Hardware token support (YubiKey)
 - [ ] Mesh networking without central gateway (full P2P)
+
+---
+
+## 🗄️ Database Strategy
+
+### Recommended Approach: Embedded Databases
+
+Since LocalMesh runs **offline without external dependencies**, we use **embedded databases**:
+
+| Database | Use Case | Why |
+|----------|----------|-----|
+| **SQLite** | Relational data (users, attendance records, notices) | Single file, ACID, SQL queries |
+| **Badger** | Fast KV store (sessions, tokens, cache) | Pure Go, LSM-tree, no CGO option |
+
+### SQLite for Structured Data
+
+```go
+// Example: Attendance records, user data, notices
+type AttendanceRecord struct {
+    ID        int64     `db:"id"`
+    StudentID string    `db:"student_id"`
+    ClassID   string    `db:"class_id"`
+    MarkedAt  time.Time `db:"marked_at"`
+    Zone      string    `db:"zone"`
+}
+```
+
+**Tools:**
+- [mattn/go-sqlite3](https://github.com/mattn/go-sqlite3) - CGO SQLite driver
+- [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) - Pure Go (no CGO!)
+- [sqlc](https://sqlc.dev/) - Generate type-safe Go from SQL
+
+### Badger for Fast KV
+
+```go
+// Example: Session tokens, rate limiting counters, hot cache
+key := []byte("session:" + sessionID)
+value := []byte(tokenJSON)
+err := db.Update(func(txn *badger.Txn) error {
+    return txn.SetEntry(badger.NewEntry(key, value).WithTTL(time.Hour))
+})
+```
+
+**Why Badger over Redis:**
+- Embedded (no separate server)
+- Pure Go
+- Persistent by default
+- TTL support built-in
+
+### Database Location
+
+```
+data/
+├── localmesh.db          # SQLite database
+├── badger/               # Badger KV directory
+│   ├── 000000.vlog
+│   └── MANIFEST
+└── backups/              # Local snapshots
+```
+
+### Migration Strategy
+
+```go
+// Use golang-migrate or custom migrations
+migrations := []Migration{
+    {Version: 1, SQL: `CREATE TABLE users (...)`},
+    {Version: 2, SQL: `CREATE TABLE attendance (...)`},
+    {Version: 3, SQL: `ALTER TABLE users ADD COLUMN zone TEXT`},
+}
+```
+
+---
+
+## 🔧 Development Environment (Omarchy Linux)
+
+### Modern CLI Tools
+
+This project is developed on Omarchy Linux with modern alternatives:
+
+| Traditional | Modern | Usage |
+|------------|--------|-------|
+| `ls`, `tree` | `eza` | `eza --tree --level=3` |
+| `grep` | `rg` (ripgrep) | `rg "TODO" --type go` |
+| `find` | `fd` | `fd "\.go$"` |
+| `cat` | `bat` | `bat file.go` |
+| `du` | `dust` | `dust -d 2` |
+
+### Useful Commands
+
+```bash
+# List project structure
+eza --tree --level=3 --icons
+
+# Find Go files
+fd "\.go$"
+
+# Search for TODO comments
+rg "TODO|FIXME" --type go
+
+# Watch for changes and rebuild
+watchexec -e go "make build"
+```
 
 ---
 
