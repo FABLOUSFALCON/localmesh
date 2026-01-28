@@ -97,6 +97,7 @@ type SecurityConfig struct {
 type GatewayConfig struct {
 	Host         string        `mapstructure:"host"`
 	Port         int           `mapstructure:"port"`
+	Hostname     string        `mapstructure:"hostname"` // .local hostname (e.g., "campus" → campus.local)
 	TLSEnabled   bool          `mapstructure:"tls_enabled"`
 	CertFile     string        `mapstructure:"cert_file"`
 	KeyFile      string        `mapstructure:"key_file"`
@@ -213,6 +214,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("gateway.host", "0.0.0.0")
 	v.SetDefault("gateway.port", 8080)
+	v.SetDefault("gateway.hostname", "mesh") // mesh.local
 	v.SetDefault("gateway.tls_enabled", false)
 	v.SetDefault("gateway.read_timeout", "30s")
 	v.SetDefault("gateway.write_timeout", "30s")

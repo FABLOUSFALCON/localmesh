@@ -33,6 +33,7 @@ type Framework struct {
 	discovery *mesh.Discovery
 	registry  *registry.Registry
 	gateway   *gateway.Gateway
+	hostname  *gateway.HostnameAdvertiser
 	auth      *auth.Service
 	network   *network.Service
 	plugins   *plugins.Loader
@@ -325,7 +326,45 @@ func (f *Framework) initGateway() error {
 		return fmt.Errorf("initializing external services: %w", err)
 	}
 
-	return f.gateway.Start()
+	// Start the gateway
+	if err := f.gateway.Start(); err != nil {
+		return err
+	}
+
+	// Start hostname advertiser for .local domain
+	f.initHostnameAdvertiser()
+
+	return nil
+}
+
+// initHostnameAdvertiser sets up mDNS hostname for gateway
+func (f *Framework) initHostnameAdvertiser() {
+	hostname := f.config.Gateway.Hostname
+	if hostname == "" {
+		hostname = "mesh" // Default
+	}
+
+	cfg := gateway.HostnameConfig{
+		Hostname: hostname,
+		Port:     f.config.Gateway.Port,
+		Logger:   f.logger,
+	}
+
+	f.hostname = gateway.NewHostnameAdvertiser(cfg)
+
+	if err := f.hostname.Start(); err != nil {
+		// Non-fatal - gateway still works without .local hostname
+		f.logger.Warn("failed to start hostname advertiser",
+			"error", err,
+			"note", "gateway still accessible via IP",
+		)
+		return
+	}
+
+	f.logger.Info("gateway accessible at",
+		"url", f.hostname.URL(),
+		"hostname", f.hostname.Hostname()+".local",
+	)
 }
 
 // initExternalServices registers external services from config
@@ -406,6 +445,10 @@ func (f *Framework) Stop() error {
 	}
 
 	// Stop components in reverse order
+	if f.hostname != nil {
+		f.hostname.Stop()
+	}
+
 	if f.gateway != nil {
 		if err := f.gateway.Stop(ctx); err != nil {
 			f.logger.Warn("error stopping gateway", "error", err)
