@@ -214,7 +214,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("gateway.host", "0.0.0.0")
 	v.SetDefault("gateway.port", 8080)
-	v.SetDefault("gateway.hostname", "mesh") // mesh.local
+	v.SetDefault("gateway.hostname", "campus") // campus.local
 	v.SetDefault("gateway.tls_enabled", false)
 	v.SetDefault("gateway.read_timeout", "30s")
 	v.SetDefault("gateway.write_timeout", "30s")
