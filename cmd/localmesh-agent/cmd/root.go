@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/FABLOUSFALCON/localmesh/internal/client"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -107,17 +109,22 @@ Examples:
 
 		fmt.Printf("📡 Connecting to LocalMesh server at %s...\n", serverAddr)
 
-		// TODO: Replace with gRPC client connection
-		// For now, we'll use a simple TCP check to verify server is reachable
-		conn, err := net.DialTimeout("tcp", serverAddr, timeout)
+		// Generate agent ID
+		agentID := fmt.Sprintf("agent-%s", uuid.New().String()[:8])
+
+		// Create gRPC client
+		grpcClient, err := client.New(client.Options{
+			ServerAddr: serverAddr,
+			AgentID:    agentID,
+			Timeout:    timeout,
+		})
 		if err != nil {
-			// Try to discover server via mDNS
 			fmt.Printf("⚠️  Could not connect to %s\n", serverAddr)
 			fmt.Println("   Make sure the LocalMesh server is running")
 			fmt.Println("   or specify --server with the correct address")
 			return fmt.Errorf("server connection failed: %w", err)
 		}
-		conn.Close()
+		defer grpcClient.Close()
 
 		// Get local IP
 		localIP, err := getLocalIP()
@@ -135,36 +142,76 @@ Examples:
 			fmt.Printf("   Description: %s\n", description)
 		}
 
-		// TODO: Implement gRPC registration call
-		// For now, simulate registration
+		// Register the service
+		ctx := context.Background()
+		result, err := grpcClient.Register(ctx, client.RegisterOptions{
+			Name:           name,
+			Port:           int32(port),
+			IP:             localIP,
+			HealthEndpoint: healthPath,
+			Description:    description,
+		})
+		if err != nil {
+			return fmt.Errorf("registration failed: %w", err)
+		}
+
+		if !result.Success {
+			return fmt.Errorf("registration failed: %s", result.Error)
+		}
+
+		// Store registration ID for heartbeats and unregister
+		registrationID := result.RegistrationID
+
 		fmt.Println()
 		fmt.Println("✅ Service registered!")
-		fmt.Printf("   URL: http://%s.campus.local:%d\n", name, port)
+		fmt.Printf("   URL: http://%s:%d\n", result.Hostname, port)
 		fmt.Println()
 		fmt.Println("⏳ Keeping registration alive... (Ctrl+C to stop)")
 
 		// Wait for interrupt
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
 		// Heartbeat loop
-		ticker := time.NewTicker(30 * time.Second)
+		heartbeatInterval := 30 * time.Second
+		if result.HeartbeatInterval > 0 {
+			heartbeatInterval = time.Duration(result.HeartbeatInterval) * time.Second
+		}
+		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ticker.C:
-				// TODO: Send heartbeat via gRPC
+				// Send heartbeat via gRPC
+				hbResult, err := grpcClient.SendHeartbeat(ctx, name, registrationID, true, "")
+				if err != nil {
+					fmt.Printf("⚠️  Heartbeat failed: %v\n", err)
+					continue
+				}
+				if !hbResult.RegistrationValid {
+					fmt.Println("🔄 Registration expired, re-registering...")
+					// Re-register
+					newResult, err := grpcClient.Register(ctx, client.RegisterOptions{
+						Name:           name,
+						Port:           int32(port),
+						IP:             localIP,
+						HealthEndpoint: healthPath,
+						Description:    description,
+					})
+					if err != nil {
+						fmt.Printf("⚠️  Re-registration failed: %v\n", err)
+					} else {
+						registrationID = newResult.RegistrationID
+					}
+				}
 				fmt.Printf("💓 Heartbeat sent (%s)\n", time.Now().Format("15:04:05"))
 			case <-sigCh:
 				fmt.Println("\n🛑 Unregistering service...")
-				// TODO: Send unregister via gRPC
+				if err := grpcClient.Unregister(ctx, name, registrationID); err != nil {
+					fmt.Printf("⚠️  Unregister failed: %v\n", err)
+				}
 				fmt.Println("✅ Service unregistered")
-				return nil
-			case <-ctx.Done():
 				return nil
 			}
 		}
@@ -181,8 +228,20 @@ var unregisterCmd = &cobra.Command{
 
 		fmt.Printf("📡 Connecting to LocalMesh server at %s...\n", serverAddr)
 
-		// TODO: Implement gRPC unregister
+		grpcClient, err := client.New(client.Options{
+			ServerAddr: serverAddr,
+			AgentID:    "unregister-client",
+			Timeout:    timeout,
+		})
+		if err != nil {
+			return fmt.Errorf("server connection failed: %w", err)
+		}
+		defer grpcClient.Close()
+
 		fmt.Printf("🛑 Unregistering service: %s\n", name)
+		if err := grpcClient.Unregister(context.Background(), name, ""); err != nil {
+			return err
+		}
 		fmt.Println("✅ Service unregistered")
 
 		return nil
@@ -198,17 +257,27 @@ var statusCmd = &cobra.Command{
 		fmt.Println("─────────────────────────────────")
 		fmt.Printf("  Server:     %s\n", serverAddr)
 
-		// Check server connection
-		conn, err := net.DialTimeout("tcp", serverAddr, timeout)
+		// Try to connect to server
+		grpcClient, err := client.New(client.Options{
+			ServerAddr: serverAddr,
+			AgentID:    "status-client",
+			Timeout:    timeout,
+		})
 		if err != nil {
 			fmt.Println("  Connection: ❌ Cannot reach server")
-		} else {
-			conn.Close()
-			fmt.Println("  Connection: ✅ Server reachable")
+			return nil
+		}
+		defer grpcClient.Close()
+		fmt.Println("  Connection: ✅ Server reachable")
+
+		// Query registered services
+		services, err := grpcClient.ListServices(context.Background(), nil)
+		if err != nil {
+			fmt.Printf("  Services:   ⚠️  Error: %v\n", err)
+			return nil
 		}
 
-		// TODO: Query registered services via gRPC
-		fmt.Println("  Services:   (use 'list' to see registered services)")
+		fmt.Printf("  Services:   %d registered\n", len(services))
 
 		return nil
 	},
@@ -217,16 +286,55 @@ var statusCmd = &cobra.Command{
 // listCmd lists registered services
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List services registered by this agent",
+	Short: "List services registered on the server",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("📦 Registered Services")
-		fmt.Println("─────────────────────────────────")
+		grpcClient, err := client.New(client.Options{
+			ServerAddr: serverAddr,
+			AgentID:    "list-client",
+			Timeout:    timeout,
+		})
+		if err != nil {
+			return fmt.Errorf("cannot connect to server: %w", err)
+		}
+		defer grpcClient.Close()
 
-		// TODO: Query from server via gRPC
-		fmt.Println("  (no services registered from this agent)")
-		fmt.Println()
-		fmt.Println("  Register a service:")
-		fmt.Println("    localmesh-agent register myapp --port 3000")
+		services, err := grpcClient.ListServices(context.Background(), nil)
+		if err != nil {
+			return fmt.Errorf("failed to list services: %w", err)
+		}
+
+		fmt.Println("📦 Registered Services")
+		fmt.Println("─────────────────────────────────────────────────")
+
+		if len(services) == 0 {
+			fmt.Println("  (no services registered)")
+			fmt.Println()
+			fmt.Println("  Register a service:")
+			fmt.Println("    localmesh-agent register myapp --port 3000")
+			return nil
+		}
+
+		for _, svc := range services {
+			statusIcon := "✅"
+			if !svc.Healthy {
+				statusIcon = "❌"
+			}
+			fmt.Printf("  %s %s\n", statusIcon, svc.Name)
+			if svc.URL != "" {
+				fmt.Printf("     URL:    %s\n", svc.URL)
+			} else {
+				fmt.Printf("     URL:    http://%s:%d\n", svc.Hostname, svc.Port)
+			}
+			if svc.Healthy {
+				fmt.Println("     Status: healthy")
+			} else {
+				fmt.Println("     Status: unhealthy")
+			}
+			if svc.Description != "" {
+				fmt.Printf("     Desc:   %s\n", svc.Description)
+			}
+			fmt.Println()
+		}
 
 		return nil
 	},

@@ -7,9 +7,10 @@
 //   - Auto-reconnection on network changes
 //
 // Usage:
-//   localmesh-agent register myapp --port 3000 --server campus.local:9000
-//   localmesh-agent status
-//   localmesh-agent unregister myapp
+//
+//	localmesh-agent register myapp --port 3000 --server campus.local:9000
+//	localmesh-agent status
+//	localmesh-agent unregister myapp
 package main
 
 import (
