@@ -3,8 +3,8 @@
 > **READ THIS FIRST** - This document is designed for AI assistants (GitHub Copilot, Claude, etc.) to understand the LocalMesh project context when the user switches accounts or starts a new conversation.
 
 **Last Updated:** January 30, 2026  
-**Current Phase:** Phase 2.2 - Federation Protocol (COMPLETE)  
-**Project Maturity:** ~85% core complete, federation ready
+**Current Phase:** Phase 2.3 - Enhanced RBAC (COMPLETE)  
+**Project Maturity:** ~90% core complete, production-ready auth
 
 ---
 
@@ -295,11 +295,23 @@ The `aiSkills/` folder contains coding rules. **ALWAYS read these before writing
 - [ ] TLS/mTLS for federation transport security (future)
 - [ ] Persistent federation state across restarts (future)
 
-### Phase 3: Enhanced RBAC 🔜 NEXT
-- [ ] WiFi SSID → Role mapping
-- [ ] Zone-based permissions
-- [ ] Cross-realm authorization
-- [ ] Policy engine for service access
+### Phase 2.3: Enhanced RBAC ✅ COMPLETE
+- [x] RBACEngine with hierarchical roles (guest → student → teacher → admin → superadmin)
+- [x] Permission system (service:*, realm:*, user:*, admin:*, cross-realm:*)
+- [x] WiFi SSID → Role mapping with wildcard pattern matching
+- [x] CrossRealmAuthorizer for federated access control
+- [x] Trust levels: none, read, access, register, full
+- [x] Role mapping between realms based on trust level
+- [x] RBAC CLI: `roles`, `role`, `ssid`, `ssid add`, `trust`, `trust add`, `check`
+- [x] Federation integration with SetRBAC(), EstablishTrust()
+- [ ] Persistent RBAC config in localmesh.yaml (future)
+- [ ] Audit logging for policy decisions (future)
+
+### Phase 3: Global Admin 🔜 NEXT
+- [ ] Super-admin realm for campus-wide management
+- [ ] Global dashboard aggregating all realms
+- [ ] Cross-realm monitoring and alerting
+- [ ] Policy distribution across realms
 
 ---
 
@@ -339,6 +351,28 @@ sudo ./build/localmesh start --dev
 
 # Leave federation
 ./build/localmesh federation leave
+
+# === RBAC Commands ===
+# List all roles and permissions
+./build/localmesh rbac roles
+
+# Show details for a specific role
+./build/localmesh rbac role teacher
+
+# List WiFi SSID to role mappings
+./build/localmesh rbac ssid
+
+# Add SSID to role mapping
+./build/localmesh rbac ssid add --ssid "CSE-Faculty*" --role teacher
+
+# List cross-realm trust relationships
+./build/localmesh rbac trust
+
+# Establish trust with another realm
+./build/localmesh rbac trust add --realm cse.campus.local --level access
+
+# Check if a role has permission
+./build/localmesh rbac check --role student --action service:access
 
 # Test mDNS resolution
 getent hosts campus.local
