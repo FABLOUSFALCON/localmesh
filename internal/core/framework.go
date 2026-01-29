@@ -436,7 +436,7 @@ func (f *Framework) initDNSServer() {
 	)
 }
 
-// initGRPC sets up the gRPC server for agent communication
+// initGRPC sets up the gRPC server for agent and federation communication
 func (f *Framework) initGRPC() error {
 	if !f.config.GRPC.Enabled {
 		f.logger.Debug("gRPC server disabled")
@@ -448,8 +448,14 @@ func (f *Framework) initGRPC() error {
 		realm = "campus"
 	}
 
-	server, err := localgrpc.NewServer(
-		f.config.GRPC.Port,
+	// Create server with both agent and federation services
+	server, err := localgrpc.NewServerWithFederation(
+		localgrpc.ServerConfig{
+			Port:      f.config.GRPC.Port,
+			RealmID:   f.nodeID,
+			RealmName: realm,
+			Endpoint:  f.config.GRPCAddr(),
+		},
 		localgrpc.WithRealm(realm),
 	)
 	if err != nil {
@@ -462,6 +468,8 @@ func (f *Framework) initGRPC() error {
 	go func() {
 		f.logger.Info("gRPC server starting",
 			"addr", f.config.GRPCAddr(),
+			"realm", realm,
+			"federation", "enabled",
 		)
 		if err := f.grpc.Start(); err != nil {
 			f.logger.Error("gRPC server error", "error", err)

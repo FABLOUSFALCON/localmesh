@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agentv1 "github.com/FABLOUSFALCON/localmesh/api/gen/agent/v1"
+	federationv1 "github.com/FABLOUSFALCON/localmesh/api/gen/federation/v1"
 	"github.com/FABLOUSFALCON/localmesh/internal/registry"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
@@ -298,15 +299,24 @@ func (s *AgentServer) GetServiceStatus(ctx context.Context, req *agentv1.GetServ
 	}, nil
 }
 
-// Server wraps a gRPC server with the agent service.
+// Server wraps a gRPC server with both agent and federation services.
 type Server struct {
-	grpcServer  *grpc.Server
-	agentServer *AgentServer
-	listener    net.Listener
-	port        int
+	grpcServer       *grpc.Server
+	agentServer      *AgentServer
+	federationServer *FederationServer
+	listener         net.Listener
+	port             int
 }
 
-// NewServer creates a new gRPC server.
+// ServerConfig configures the combined gRPC server.
+type ServerConfig struct {
+	Port      int
+	RealmID   string
+	RealmName string
+	Endpoint  string
+}
+
+// NewServer creates a new gRPC server with agent and federation services.
 func NewServer(port int, opts ...ServerOption) (*Server, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -323,6 +333,40 @@ func NewServer(port int, opts ...ServerOption) (*Server, error) {
 		agentServer: agentServer,
 		listener:    listener,
 		port:        port,
+	}, nil
+}
+
+// NewServerWithFederation creates a gRPC server with both agent and federation services.
+func NewServerWithFederation(cfg ServerConfig, opts ...ServerOption) (*Server, error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen on port %d: %w", cfg.Port, err)
+	}
+
+	grpcServer := grpc.NewServer()
+	agentServer := NewAgentServer(opts...)
+
+	// Create federation server
+	fedServer, err := NewFederationServer(FederationServerConfig{
+		RealmID:   cfg.RealmID,
+		RealmName: cfg.RealmName,
+		Endpoint:  cfg.Endpoint,
+	})
+	if err != nil {
+		listener.Close()
+		return nil, fmt.Errorf("creating federation server: %w", err)
+	}
+
+	// Register both services
+	agentv1.RegisterAgentServiceServer(grpcServer, agentServer)
+	federationv1.RegisterFederationServiceServer(grpcServer, fedServer)
+
+	return &Server{
+		grpcServer:       grpcServer,
+		agentServer:      agentServer,
+		federationServer: fedServer,
+		listener:         listener,
+		port:             cfg.Port,
 	}, nil
 }
 
@@ -344,4 +388,9 @@ func (s *Server) Port() int {
 // AgentServer returns the underlying agent server.
 func (s *Server) AgentServer() *AgentServer {
 	return s.agentServer
+}
+
+// FederationServer returns the underlying federation server.
+func (s *Server) FederationServer() *FederationServer {
+	return s.federationServer
 }
