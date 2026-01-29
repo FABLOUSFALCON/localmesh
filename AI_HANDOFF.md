@@ -3,8 +3,8 @@
 > **READ THIS FIRST** - This document is designed for AI assistants (GitHub Copilot, Claude, etc.) to understand the LocalMesh project context when the user switches accounts or starts a new conversation.
 
 **Last Updated:** January 30, 2026  
-**Current Phase:** Phase 2.1 - LocalMesh Agent Binary (COMPLETE)  
-**Project Maturity:** ~75% core complete, gRPC infrastructure ready
+**Current Phase:** Phase 2.2 - Federation Protocol (COMPLETE)  
+**Project Maturity:** ~85% core complete, federation ready
 
 ---
 
@@ -56,7 +56,9 @@
 │  internal/core/         ─── Framework Orchestration            │
 │       │                                                         │
 │       ├──► internal/gateway/    ─── HTTP Gateway + mDNS + DNS  │
-│       ├──► internal/grpc/       ─── gRPC Server (AgentService) │
+│       ├──► internal/grpc/       ─── gRPC (Agent + Federation)  │
+│       │         ├─ AgentService      (service registration)    │
+│       │         └─ FederationService (realm-to-realm sync)     │
 │       ├──► internal/registry/   ─── Service Registry + mDNS    │
 │       ├──► internal/auth/       ─── PASETO Auth Engine         │
 │       ├──► internal/mesh/       ─── Node Discovery (hashicorp) │
@@ -66,6 +68,8 @@
 │       └──► internal/plugins/    ─── Go Plugin Loader           │
 │                                                                 │
 │  api/proto/             ─── gRPC Proto Definitions             │
+│       ├─ agent/v1/          (AgentService)                     │
+│       └─ federation/v1/     (FederationService)                │
 │  api/gen/               ─── Generated gRPC Code                │
 │  pkg/sdk/               ─── Public SDK for plugin developers   │
 │                                                                 │
@@ -85,6 +89,36 @@
 │    unregister <name>               → Remove registration       │
 │    status                          → Server connection status  │
 │    list                            → List registered services  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     Federation Architecture                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│    ┌─────────────┐         ┌─────────────┐                     │
+│    │  Realm A    │◄───────►│  Realm B    │                     │
+│    │  (campus)   │  gRPC   │  (cse)      │                     │
+│    │  :9000      │ Fed Svc │  :9000      │                     │
+│    └─────────────┘         └─────────────┘                     │
+│          │                       │                              │
+│    Ed25519 Keys            Ed25519 Keys                        │
+│    Service Catalog         Service Catalog                      │
+│                                                                 │
+│  Federation RPCs:                                               │
+│    JoinFederation   ─── Establish peer connection              │
+│    LeaveFederation  ─── Disconnect from peer                   │
+│    SyncServices     ─── Exchange service catalogs              │
+│    ResolveService   ─── Find service across realms             │
+│    ExchangeTrust    ─── Share public keys for auth             │
+│    Ping             ─── Health check                           │
+│                                                                 │
+│  CLI Commands:                                                  │
+│    federation status       ─── Show realm and federation info  │
+│    federation join --peer  ─── Join another realm              │
+│    federation peers        ─── List connected peers            │
+│    federation sync         ─── Sync services with peers        │
+│    federation leave        ─── Leave current federation        │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -247,17 +281,25 @@ The `aiSkills/` folder contains coding rules. **ALWAYS read these before writing
 - [x] gRPC server in `internal/grpc/server.go`
 - [x] Framework integration with GRPCConfig
 
-### Phase 2.2: Federation Protocol 🔜 NEXT
+### Phase 2.2: Federation Protocol ✅ COMPLETE
 - [x] Define gRPC FederationService proto (`api/proto/federation/v1/`)
-- [ ] Implement FederationService server
-- [ ] Cross-realm service resolution
-- [ ] Trust exchange between realms
-- [ ] Realm discovery and peering
+- [x] Implement FederationServer (`internal/grpc/federation.go`)
+- [x] Ed25519 keypair generation for realm identity
+- [x] JoinFederation, LeaveFederation RPCs
+- [x] SyncServices RPC for catalog synchronization
+- [x] ResolveService RPC with zone-based access control
+- [x] ExchangeTrust RPC for secure trust establishment
+- [x] Federation CLI: `status`, `join`, `peers`, `sync`, `leave`
+- [x] Framework integration with NewServerWithFederation()
+- [ ] Automatic peer discovery via mDNS (future enhancement)
+- [ ] TLS/mTLS for federation transport security (future)
+- [ ] Persistent federation state across restarts (future)
 
-### Phase 3: Enhanced RBAC
+### Phase 3: Enhanced RBAC 🔜 NEXT
 - [ ] WiFi SSID → Role mapping
 - [ ] Zone-based permissions
 - [ ] Cross-realm authorization
+- [ ] Policy engine for service access
 
 ---
 
@@ -282,6 +324,22 @@ sudo ./build/localmesh start --dev
 ./build/localmesh-agent status --server localhost:9000
 ./build/localmesh-agent unregister myapp --server localhost:9000
 
+# === Federation Commands ===
+# View federation status
+./build/localmesh federation status
+
+# Join another realm's federation
+./build/localmesh federation join --peer cse.campus.local:9000
+
+# List connected federation peers
+./build/localmesh federation peers
+
+# Sync services with all connected peers
+./build/localmesh federation sync
+
+# Leave federation
+./build/localmesh federation leave
+
 # Test mDNS resolution
 getent hosts campus.local
 curl http://campus.local:8080/health
@@ -292,7 +350,7 @@ dig @<WIFI_IP> campus.local +short
 
 ### Ports Used
 - **8080:** HTTP Gateway
-- **9000:** gRPC AgentService (agent-to-server communication)
+- **9000:** gRPC (AgentService + FederationService)
 - **53:** DNS Server (bound to WiFi IP)
 - **5353:** mDNS (via Avahi daemon)
 
