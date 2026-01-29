@@ -1,5 +1,5 @@
 // Package gateway provides hostname advertising for the LocalMesh gateway.
-// Advertises a .local hostname via mDNS so devices can access gateway
+// Advertises a .local hostname via Avahi/mDNS so devices can access gateway
 // using a friendly URL like http://campus.local instead of IP:port
 package gateway
 
@@ -8,17 +8,18 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
-
-	"github.com/grandcat/zeroconf"
 )
 
 // HostnameAdvertiser advertises the gateway with a .local hostname
+// Uses avahi-publish-address which integrates with the system's mDNS
 type HostnameAdvertiser struct {
 	hostname string
 	port     int
-	server   *zeroconf.Server
 	logger   *slog.Logger
+	ips      []net.IP
+	cmd      *exec.Cmd
 }
 
 // HostnameConfig configures the hostname advertiser
@@ -41,9 +42,9 @@ func DefaultHostnameConfig() HostnameConfig {
 	if idx := strings.Index(hostname, "."); idx > 0 {
 		hostname = hostname[:idx]
 	}
-	// Default to "mesh" if hostname is empty or weird
+	// Default to "campus" (not "mesh" to avoid collision with mDNS service name)
 	if hostname == "" || hostname == "localhost" {
-		hostname = "mesh"
+		hostname = "campus"
 	}
 
 	return HostnameConfig{
@@ -62,7 +63,7 @@ func NewHostnameAdvertiser(cfg HostnameConfig) *HostnameAdvertiser {
 	}
 }
 
-// Start begins advertising the hostname via mDNS
+// Start begins advertising the hostname via mDNS using avahi-publish-address
 func (h *HostnameAdvertiser) Start() error {
 	// Get local IP addresses
 	ips, err := getLocalIPs()
@@ -73,49 +74,47 @@ func (h *HostnameAdvertiser) Start() error {
 	if len(ips) == 0 {
 		return fmt.Errorf("no local IP addresses found")
 	}
+	h.ips = ips
 
-	// Register HTTP service with our hostname
-	// Service type: _http._tcp allows browsers to discover us
-	server, err := zeroconf.Register(
-		h.hostname,   // Instance name (becomes hostname.local)
-		"_http._tcp", // Service type
-		"local.",     // Domain
-		h.port,       // Port
-		[]string{ // TXT records
-			"path=/",
-			"localmesh=gateway",
-			"version=1.0.0",
-		},
-		nil, // All network interfaces
-	)
+	// Use the first IP for the hostname
+	ip := ips[0].String()
+	fqdn := h.hostname + ".local"
+
+	// Check if avahi-publish-address is available
+	_, err = exec.LookPath("avahi-publish-address")
 	if err != nil {
-		return fmt.Errorf("failed to register hostname: %w", err)
+		h.logger.Warn("avahi-publish-address not found, mDNS hostname won't work",
+			"install", "sudo pacman -S avahi OR sudo apt install avahi-utils")
+		return nil // Don't fail, just warn
 	}
 
-	h.server = server
+	// Start avahi-publish-address in background
+	// -R disables reverse lookup (PTR record) which can cause issues
+	h.cmd = exec.Command("avahi-publish-address", "-R", fqdn, ip)
+	h.cmd.Stdout = nil
+	h.cmd.Stderr = nil
 
-	h.logger.Info("hostname advertised",
-		"hostname", fmt.Sprintf("%s.local", h.hostname),
+	if err := h.cmd.Start(); err != nil {
+		h.logger.Warn("failed to start avahi-publish-address", "error", err)
+		return nil // Don't fail, just warn
+	}
+
+	h.logger.Info("hostname advertised via mDNS (Avahi)",
+		"hostname", fqdn,
 		"port", h.port,
-		"url", fmt.Sprintf("http://%s.local:%d", h.hostname, h.port),
-		"ips", ipsToStrings(ips),
+		"url", h.URL(),
+		"ip", ip,
 	)
-
-	// Also log a nicer URL if port is 80
-	if h.port == 80 {
-		h.logger.Info("access gateway at",
-			"url", fmt.Sprintf("http://%s.local", h.hostname),
-		)
-	}
 
 	return nil
 }
 
 // Stop stops advertising the hostname
 func (h *HostnameAdvertiser) Stop() {
-	if h.server != nil {
-		h.server.Shutdown()
-		h.server = nil
+	if h.cmd != nil && h.cmd.Process != nil {
+		h.cmd.Process.Kill()
+		h.cmd.Wait()
+		h.cmd = nil
 		h.logger.Info("hostname advertisement stopped")
 	}
 }
@@ -133,7 +132,12 @@ func (h *HostnameAdvertiser) URL() string {
 	return fmt.Sprintf("http://%s.local:%d", h.hostname, h.port)
 }
 
-// getLocalIPs returns all local non-loopback IP addresses
+// IPs returns the advertised IP addresses
+func (h *HostnameAdvertiser) IPs() []net.IP {
+	return h.ips
+}
+
+// getLocalIPs returns all local non-loopback IPv4 addresses
 func getLocalIPs() ([]net.IP, error) {
 	var ips []net.IP
 
@@ -145,6 +149,15 @@ func getLocalIPs() ([]net.IP, error) {
 	for _, iface := range interfaces {
 		// Skip loopback and down interfaces
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		// Skip docker/virtual interfaces for cleaner mDNS
+		name := strings.ToLower(iface.Name)
+		if strings.HasPrefix(name, "docker") ||
+			strings.HasPrefix(name, "veth") ||
+			strings.HasPrefix(name, "br-") ||
+			strings.HasPrefix(name, "virbr") {
 			continue
 		}
 
@@ -162,12 +175,12 @@ func getLocalIPs() ([]net.IP, error) {
 				ip = v.IP
 			}
 
-			// Skip loopback and IPv6 link-local
+			// Only use IPv4, skip loopback and link-local
 			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
 				continue
 			}
 
-			// Prefer IPv4
+			// Only IPv4 for broader compatibility
 			if ip4 := ip.To4(); ip4 != nil {
 				ips = append(ips, ip4)
 			}
