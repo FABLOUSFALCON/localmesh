@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"sync"
@@ -34,6 +35,7 @@ type Framework struct {
 	registry  *registry.Registry
 	gateway   *gateway.Gateway
 	hostname  *gateway.HostnameAdvertiser
+	dns       *gateway.DNSServer
 	auth      *auth.Service
 	network   *network.Service
 	plugins   *plugins.Loader
@@ -334,6 +336,9 @@ func (f *Framework) initGateway() error {
 	// Start hostname advertiser for .local domain
 	f.initHostnameAdvertiser()
 
+	// Start DNS server for Android/non-mDNS devices
+	f.initDNSServer()
+
 	return nil
 }
 
@@ -341,7 +346,7 @@ func (f *Framework) initGateway() error {
 func (f *Framework) initHostnameAdvertiser() {
 	hostname := f.config.Gateway.Hostname
 	if hostname == "" {
-		hostname = "mesh" // Default
+		hostname = "campus" // Default (not 'mesh' to avoid mDNS collision)
 	}
 
 	cfg := gateway.HostnameConfig{
@@ -364,6 +369,57 @@ func (f *Framework) initHostnameAdvertiser() {
 	f.logger.Info("gateway accessible at",
 		"url", f.hostname.URL(),
 		"hostname", f.hostname.Hostname()+".local",
+	)
+}
+
+// initDNSServer starts a DNS server for devices that don't support mDNS (like Android)
+func (f *Framework) initDNSServer() {
+	// Get our IP from hostname advertiser (it already detected local IPs)
+	var ip net.IP
+	if f.hostname != nil && len(f.hostname.IPs()) > 0 {
+		ip = f.hostname.IPs()[0]
+	}
+
+	if ip == nil {
+		f.logger.Warn("cannot start DNS server: no IP address found")
+		return
+	}
+
+	hostname := f.config.Gateway.Hostname
+	if hostname == "" {
+		hostname = "campus"
+	}
+
+	cfg := gateway.DNSConfig{
+		Domain:   hostname + ".local",
+		IP:       ip,
+		Port:     53, // Standard DNS port (requires root/sudo)
+		Upstream: []string{"8.8.8.8:53", "1.1.1.1:53"},
+		Logger:   f.logger,
+	}
+
+	f.dns = gateway.NewDNSServer(cfg)
+
+	if err := f.dns.Start(); err != nil {
+		// Try alternate port if 53 is in use or no permission
+		f.logger.Warn("DNS server on port 53 failed, trying 5354",
+			"error", err,
+		)
+		cfg.Port = 5354
+		f.dns = gateway.NewDNSServer(cfg)
+		if err := f.dns.Start(); err != nil {
+			f.logger.Warn("DNS server failed to start",
+				"error", err,
+				"note", "Android devices need to use IP address directly",
+			)
+			return
+		}
+	}
+
+	f.logger.Info("DNS server started",
+		"domain", f.dns.Domain(),
+		"ip", f.dns.IP().String(),
+		"note", "Configure WiFi DHCP to use this IP as DNS for Android support",
 	)
 }
 
@@ -445,6 +501,10 @@ func (f *Framework) Stop() error {
 	}
 
 	// Stop components in reverse order
+	if f.dns != nil {
+		f.dns.Stop()
+	}
+
 	if f.hostname != nil {
 		f.hostname.Stop()
 	}
