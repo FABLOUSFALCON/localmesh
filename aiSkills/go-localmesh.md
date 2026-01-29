@@ -223,3 +223,115 @@ Before committing any code:
 - [ ] No race conditions (run with -race)
 - [ ] golangci-lint passes
 - [ ] govulncheck clean
+
+## Lessons Learned (Real Debugging Sessions)
+
+### mDNS Hostname vs Service Registration
+
+**Problem:** Needed `campus.local` to resolve to the gateway IP.
+
+**Wrong approach:** Used `grandcat/zeroconf` - it registers services like `_http._tcp` but doesn't create A records for hostnames.
+
+**Solution:** Use `avahi-publish-address` command:
+```go
+// Register hostname (A record)
+cmd := exec.CommandContext(ctx, "avahi-publish-address", "-R", "campus.local", ip)
+cmd.Start()
+```
+
+### Port 5353 Already in Use
+
+**Problem:** Trying to bind to port 5353 fails because system Avahi uses it.
+
+**Solution:** Don't bind to 5353 directly. Use `avahi-publish-address` subprocess or `hashicorp/mdns` which works through multicast.
+
+### DNS Server Conflicts with systemd-resolved
+
+**Problem:** Binding DNS server to `:53` conflicts with systemd-resolved.
+
+**Solution:** Bind to specific WiFi interface IP:
+```go
+// Get WiFi IP first, then bind specifically
+dns.ListenAndServe(wifiIP+":53", "udp", handler)
+```
+
+### Firewall Rules
+
+LocalMesh needs these UFW rules:
+```bash
+sudo ufw allow 8080/tcp  # Gateway
+sudo ufw allow 5353/udp  # mDNS
+sudo ufw allow 53/udp    # DNS (if enabled)
+```
+
+### mDNS on Android
+
+Android Chrome DOES support `.local` domains via mDNS. If it's not working:
+1. Check you're not testing on the hotspot device itself
+2. Test from a client device connected to the network
+3. mDNS won't work for the device hosting the hotspot to reach itself
+
+## mDNS/DNS Pattern for LocalMesh
+
+```go
+// The correct pattern for advertising a hostname:
+
+// 1. Use avahi-publish-address for hostname (A record)
+func advertiseHostname(ctx context.Context, hostname, ip string) error {
+    cmd := exec.CommandContext(ctx, "avahi-publish-address", "-R", hostname+".local", ip)
+    return cmd.Start()
+}
+
+// 2. Use hashicorp/mdns for service discovery between nodes
+func discoverServices() {
+    mdns.Lookup("_mesh._tcp", entriesCh)
+}
+
+// 3. Use miekg/dns for DNS server (Android/enterprise support)
+func startDNSServer(wifiIP string) {
+    dns.ListenAndServe(wifiIP+":53", "udp", handler)
+}
+```
+
+## External Command Pattern
+
+When running system commands:
+```go
+func runCommand(ctx context.Context, name string, args ...string) error {
+    cmd := exec.CommandContext(ctx, name, args...)
+    
+    // Capture output for debugging
+    var stderr bytes.Buffer
+    cmd.Stderr = &stderr
+    
+    if err := cmd.Run(); err != nil {
+        return fmt.Errorf("%s failed: %w (stderr: %s)", name, err, stderr.String())
+    }
+    return nil
+}
+```
+
+## Network Interface Detection
+
+```go
+// Get WiFi interface and IP
+func getWiFiIP() (string, string, error) {
+    ifaces, _ := net.Interfaces()
+    for _, iface := range ifaces {
+        // Skip loopback, docker, etc.
+        if iface.Name == "lo" || strings.HasPrefix(iface.Name, "docker") {
+            continue
+        }
+        if iface.Flags&net.FlagUp == 0 {
+            continue
+        }
+        
+        addrs, _ := iface.Addrs()
+        for _, addr := range addrs {
+            if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+                return iface.Name, ipnet.IP.String(), nil
+            }
+        }
+    }
+    return "", "", errors.New("no suitable interface found")
+}
