@@ -1,21 +1,34 @@
-.PHONY: all build test lint security clean dev install help
+.PHONY: all build build-agent test lint security clean dev install help proto
 
 # Variables
 BINARY_NAME=localmesh
+AGENT_NAME=localmesh-agent
 BUILD_DIR=./build
 CMD_DIR=./cmd/localmesh
+AGENT_CMD_DIR=./cmd/localmesh-agent
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-X main.version=$(VERSION)"
 
 # Default target
 all: lint test build
 
-# Build the binary
+# Build the main binary
 build:
 	@echo "🔨 Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)
 	@echo "✅ Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+
+# Build the agent binary
+build-agent:
+	@echo "🔨 Building $(AGENT_NAME)..."
+	@mkdir -p $(BUILD_DIR)
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(AGENT_NAME) $(AGENT_CMD_DIR)
+	@echo "✅ Build complete: $(BUILD_DIR)/$(AGENT_NAME)"
+
+# Build all binaries
+build-all: build build-agent
+	@echo "✅ All binaries built"
 
 # Run tests
 test:
@@ -88,6 +101,25 @@ fmt:
 	go fmt ./...
 	goimports -w .
 
+# Generate protobuf code
+proto:
+	@echo "🔧 Generating protobuf code..."
+	@if command -v buf >/dev/null 2>&1; then \
+		cd api/proto && buf generate; \
+		echo "✅ Proto generation complete"; \
+	else \
+		echo "⚠️  buf not installed. Install with: go install github.com/bufbuild/buf/cmd/buf@latest"; \
+		exit 1; \
+	fi
+
+# Install proto tools
+proto-deps:
+	@echo "📦 Installing protobuf tools..."
+	go install github.com/bufbuild/buf/cmd/buf@latest
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+	@echo "✅ Proto tools installed"
+
 # Run pre-commit checks (lint + test + security)
 precommit: lint test security
 	@echo "✅ All pre-commit checks passed"
@@ -100,12 +132,16 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  all           Run lint, test, and build (default)"
-	@echo "  build         Build the binary"
+	@echo "  build         Build the main binary"
+	@echo "  build-agent   Build the agent binary"
+	@echo "  build-all     Build all binaries"
 	@echo "  test          Run tests"
 	@echo "  test-coverage Run tests with coverage report"
 	@echo "  lint          Run golangci-lint"
 	@echo "  security      Run security audit (govulncheck + gosec)"
 	@echo "  deps          Install dependencies and tools"
+	@echo "  proto         Generate protobuf code"
+	@echo "  proto-deps    Install protobuf tools"
 	@echo "  dev           Run in development mode"
 	@echo "  clean         Clean build artifacts"
 	@echo "  install       Install binary to GOPATH/bin"
