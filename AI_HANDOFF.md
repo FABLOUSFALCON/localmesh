@@ -207,14 +207,16 @@ The `aiSkills/` folder contains coding rules. **ALWAYS read these before writing
 
 ## 🗺️ CURRENT ROADMAP
 
-### Phase 1: Dynamic mDNS Hostname Assignment (CURRENT)
-- [ ] Network interface selection (CLI, TUI, YAML, ENV)
-- [ ] Configurable gateway hostname
-- [ ] `localmesh register <name> --port <port>` command
-- [ ] `localmesh unregister <name>` command
-- [ ] `localmesh services` list command
+### Phase 1: Dynamic mDNS Hostname Assignment (PARTIALLY COMPLETE ✅)
+- [x] Network interface selection CLI (`localmesh network interfaces`)
+- [x] `localmesh register <name> --port <port>` command
+- [x] `localmesh unregister <name>` command
+- [x] `localmesh services` list command
+- [x] MDNSRegistry with avahi-publish-address integration
+- [ ] Network interface selection (TUI, YAML, ENV) - remaining
+- [ ] Configurable gateway hostname via CLI flag
 - [ ] TUI service registration form
-- [ ] Health monitoring for registered services
+- [ ] Health monitoring integration with TUI
 
 ### Phase 2.1: LocalMesh Agent Binary
 - [ ] Create `cmd/localmesh-agent/main.go`
@@ -242,6 +244,15 @@ make build
 
 # Run in dev mode (requires sudo for mDNS/DNS)
 sudo ./localmesh start --dev
+
+# Register a service (NEW!)
+./localmesh register myapp --port 3000
+
+# List registered services (NEW!)
+./localmesh services
+
+# List network interfaces (NEW!)
+./localmesh network interfaces
 
 # Test mDNS resolution
 getent hosts campus.local

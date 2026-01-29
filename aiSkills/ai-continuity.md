@@ -93,11 +93,16 @@ Update these when completing work:
 
 ```
 Last Working Session: January 30, 2026
-Current Phase: Phase 1 - Dynamic mDNS Hostname Assignment
-Last Feature Completed: DNS server for Android support
-Next Feature: Network interface selection
+Current Phase: Phase 1 - Dynamic mDNS Hostname Assignment (70% complete)
+Last Feature Completed: CLI commands (register, unregister, services, network interfaces)
+Next Feature: TUI service registration form OR Phase 2.1 agent binary
 Blocking Issues: None
 ```
+
+### Recently Added Files (Jan 30, 2026):
+- `internal/network/interfaces.go` - Network interface detection
+- `internal/registry/mdns_registry.go` - mDNS service registration with avahi
+- Updated `cmd/localmesh/cmd/root.go` - Added register, unregister, services commands
 
 ## Recovery From Confusion
 
