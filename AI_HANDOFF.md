@@ -3,8 +3,8 @@
 > **READ THIS FIRST** - This document is designed for AI assistants (GitHub Copilot, Claude, etc.) to understand the LocalMesh project context when the user switches accounts or starts a new conversation.
 
 **Last Updated:** January 30, 2026  
-**Current Phase:** Phase 1 - Dynamic mDNS Hostname Assignment  
-**Project Maturity:** ~60% core complete, architecture documented
+**Current Phase:** Phase 2.1 - LocalMesh Agent Binary (COMPLETE)  
+**Project Maturity:** ~75% core complete, gRPC infrastructure ready
 
 ---
 
@@ -56,7 +56,8 @@
 │  internal/core/         ─── Framework Orchestration            │
 │       │                                                         │
 │       ├──► internal/gateway/    ─── HTTP Gateway + mDNS + DNS  │
-│       ├──► internal/registry/   ─── Service Registry           │
+│       ├──► internal/grpc/       ─── gRPC Server (AgentService) │
+│       ├──► internal/registry/   ─── Service Registry + mDNS    │
 │       ├──► internal/auth/       ─── PASETO Auth Engine         │
 │       ├──► internal/mesh/       ─── Node Discovery (hashicorp) │
 │       ├──► internal/network/    ─── WiFi/Network Detection     │
@@ -64,7 +65,26 @@
 │       ├──► internal/tui/        ─── Bubble Tea Dashboard       │
 │       └──► internal/plugins/    ─── Go Plugin Loader           │
 │                                                                 │
+│  api/proto/             ─── gRPC Proto Definitions             │
+│  api/gen/               ─── Generated gRPC Code                │
 │  pkg/sdk/               ─── Public SDK for plugin developers   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     LocalMesh Agent                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  cmd/localmesh-agent/   ─── Agent CLI Entry                    │
+│       │                                                         │
+│       ▼                                                         │
+│  internal/client/       ─── gRPC Client for AgentService       │
+│                                                                 │
+│  Commands:                                                      │
+│    register <name> --port <port>  → Service registration       │
+│    unregister <name>               → Remove registration       │
+│    status                          → Server connection status  │
+│    list                            → List registered services  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -207,27 +227,32 @@ The `aiSkills/` folder contains coding rules. **ALWAYS read these before writing
 
 ## 🗺️ CURRENT ROADMAP
 
-### Phase 1: Dynamic mDNS Hostname Assignment (PARTIALLY COMPLETE ✅)
+### Phase 1: Dynamic mDNS Hostname Assignment ✅ COMPLETE
 - [x] Network interface selection CLI (`localmesh network interfaces`)
 - [x] `localmesh register <name> --port <port>` command
 - [x] `localmesh unregister <name>` command
 - [x] `localmesh services` list command
 - [x] MDNSRegistry with avahi-publish-address integration
-- [ ] Network interface selection (TUI, YAML, ENV) - remaining
-- [ ] Configurable gateway hostname via CLI flag
-- [ ] TUI service registration form
-- [ ] Health monitoring integration with TUI
+- [x] `--hostname` and `--interfaces` flags on `start` command
+- [ ] Network interface selection in TUI - remaining for polish
+- [ ] TUI service registration form - remaining for polish
 
-### Phase 2.1: LocalMesh Agent Binary
-- [ ] Create `cmd/localmesh-agent/main.go`
-- [ ] Define gRPC proto files (`api/proto/`)
-- [ ] Implement AgentService (Register, Unregister, Heartbeat, ListServices)
-- [ ] Agent CLI: `register`, `unregister`, `status`, `list`
+### Phase 2.1: LocalMesh Agent Binary ✅ COMPLETE
+- [x] Create `cmd/localmesh-agent/main.go`
+- [x] Define gRPC proto files (`api/proto/agent/v1/agent.proto`)
+- [x] Generated gRPC code (`api/gen/agent/v1/`)
+- [x] Implement AgentService (Register, Unregister, Heartbeat, ListServices, GetServiceStatus)
+- [x] Agent CLI: `register`, `unregister`, `status`, `list`
+- [x] gRPC client in `internal/client/client.go`
+- [x] gRPC server in `internal/grpc/server.go`
+- [x] Framework integration with GRPCConfig
 
-### Phase 2.2: Federation Protocol
-- [ ] gRPC FederationService (SyncServices, ResolveService, JoinFederation)
+### Phase 2.2: Federation Protocol 🔜 NEXT
+- [x] Define gRPC FederationService proto (`api/proto/federation/v1/`)
+- [ ] Implement FederationService server
 - [ ] Cross-realm service resolution
 - [ ] Trust exchange between realms
+- [ ] Realm discovery and peering
 
 ### Phase 3: Enhanced RBAC
 - [ ] WiFi SSID → Role mapping
@@ -239,20 +264,23 @@ The `aiSkills/` folder contains coding rules. **ALWAYS read these before writing
 ## 🔌 RUNNING THE PROJECT
 
 ```bash
-# Build
-make build
+# Build all binaries
+make build-all
 
-# Run in dev mode (requires sudo for mDNS/DNS)
-sudo ./localmesh start --dev
+# Run server in dev mode (requires sudo for mDNS/DNS)
+sudo ./build/localmesh start --dev
 
-# Register a service (NEW!)
-./localmesh register myapp --port 3000
+# === Using localmesh CLI (legacy/direct) ===
+./build/localmesh register myapp --port 3000
+./build/localmesh services
+./build/localmesh network interfaces
 
-# List registered services (NEW!)
-./localmesh services
-
-# List network interfaces (NEW!)
-./localmesh network interfaces
+# === Using localmesh-agent (recommended) ===
+# In another terminal, while server is running:
+./build/localmesh-agent register myapp --port 3000 --server localhost:9000
+./build/localmesh-agent list --server localhost:9000
+./build/localmesh-agent status --server localhost:9000
+./build/localmesh-agent unregister myapp --server localhost:9000
 
 # Test mDNS resolution
 getent hosts campus.local
@@ -262,11 +290,11 @@ curl http://campus.local:8080/health
 dig @<WIFI_IP> campus.local +short
 ```
 
-### Current Working Configuration
-- **WiFi SSID:** `pun` (varies by user's network)
-- **Gateway Port:** 8080
-- **Hostname:** campus.local
-- **DNS Port:** 53 (bound to WiFi IP)
+### Ports Used
+- **8080:** HTTP Gateway
+- **9000:** gRPC AgentService (agent-to-server communication)
+- **53:** DNS Server (bound to WiFi IP)
+- **5353:** mDNS (via Avahi daemon)
 
 ---
 
