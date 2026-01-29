@@ -16,23 +16,29 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"github.com/FABLOUSFALCON/localmesh/internal/auth"
 )
 
 // FederationServer implements the FederationService gRPC interface.
 type FederationServer struct {
 	federationv1.UnimplementedFederationServiceServer
 
-	realmID     string
-	realmName   string
-	endpoint    string
-	publicKey   ed25519.PublicKey
-	privateKey  ed25519.PrivateKey
+	realmID    string
+	realmName  string
+	endpoint   string
+	publicKey  ed25519.PublicKey
+	privateKey ed25519.PrivateKey
 
 	// Federation state
 	federationID string
 	peers        map[string]*peerRealm
 	services     map[string]*serviceSummary // local services for sync
 	mu           sync.RWMutex
+
+	// RBAC integration
+	rbac       *auth.RBACEngine
+	crossRealm *auth.CrossRealmAuthorizer
 
 	// Callbacks
 	onPeerJoined  func(realm *peerRealm)
@@ -42,18 +48,18 @@ type FederationServer struct {
 
 // peerRealm represents a connected peer in the federation.
 type peerRealm struct {
-	ID            string
-	Name          string
-	Endpoint      string
-	PublicKey     []byte
-	JoinedAt      time.Time
-	LastSeen      time.Time
-	Status        string
-	ServiceCount  int32
-	TrustToken    []byte
-	Permissions   []string
-	client        federationv1.FederationServiceClient
-	conn          *grpc.ClientConn
+	ID           string
+	Name         string
+	Endpoint     string
+	PublicKey    []byte
+	JoinedAt     time.Time
+	LastSeen     time.Time
+	Status       string
+	ServiceCount int32
+	TrustToken   []byte
+	Permissions  []string
+	client       federationv1.FederationServiceClient
+	conn         *grpc.ClientConn
 }
 
 // serviceSummary represents a service for federation sync.
@@ -586,4 +592,64 @@ func (s *FederationServer) RemoveLocalService(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.services, name)
+}
+
+// SetRBAC sets the RBAC engine for permission checking.
+func (s *FederationServer) SetRBAC(rbac *auth.RBACEngine) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rbac = rbac
+	s.crossRealm = auth.NewCrossRealmAuthorizer(s.realmID, rbac)
+}
+
+// GetCrossRealmAuthorizer returns the cross-realm authorizer.
+func (s *FederationServer) GetCrossRealmAuthorizer() *auth.CrossRealmAuthorizer {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.crossRealm
+}
+
+// EstablishTrust creates a trust relationship with a peer realm.
+func (s *FederationServer) EstablishTrust(remoteRealmID string, level auth.TrustLevel, permissions []auth.Permission) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.crossRealm == nil {
+		return fmt.Errorf("RBAC not initialized")
+	}
+
+	peer, exists := s.peers[remoteRealmID]
+	if !exists {
+		return fmt.Errorf("realm %q is not a federation peer", remoteRealmID)
+	}
+
+	trust := &auth.RealmTrust{
+		LocalRealmID:    s.realmID,
+		RemoteRealmID:   remoteRealmID,
+		RemoteRealmName: peer.Name,
+		TrustLevel:      level,
+		Permissions:     permissions,
+	}
+
+	return s.crossRealm.EstablishTrust(trust)
+}
+
+// AuthorizeCrossRealmRequest checks if a cross-realm request is allowed.
+func (s *FederationServer) AuthorizeCrossRealmRequest(ctx context.Context, sourceRealmID, userRole, action, resource string) (*auth.CrossRealmResponse, error) {
+	s.mu.RLock()
+	cra := s.crossRealm
+	s.mu.RUnlock()
+
+	if cra == nil {
+		return nil, fmt.Errorf("RBAC not initialized")
+	}
+
+	req := &auth.CrossRealmRequest{
+		SourceRealmID: sourceRealmID,
+		UserRole:      userRole,
+		Action:        action,
+		Resource:      resource,
+	}
+
+	return cra.Authorize(ctx, req), nil
 }
