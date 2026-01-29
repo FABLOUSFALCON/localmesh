@@ -201,10 +201,19 @@ log:
 var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the LocalMesh framework",
-	Long:  `Start the LocalMesh gateway and all enabled plugins.`,
+	Long: `Start the LocalMesh gateway and all enabled plugins.
+
+Examples:
+  localmesh start                          # Start with defaults
+  localmesh start --dev                    # Development mode with demo plugins
+  localmesh start --hostname myuni         # Custom hostname (myuni.local)
+  localmesh start --interfaces wlan0,eth0  # Specific interfaces`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dev, _ := cmd.Flags().GetBool("dev")
 		withDemoPlugins, _ := cmd.Flags().GetBool("demo-plugins")
+		hostnameFlag, _ := cmd.Flags().GetString("hostname")
+		interfacesFlag, _ := cmd.Flags().GetStringSlice("interfaces")
+
 		if dev {
 			fmt.Println("🔧 Starting in development mode...")
 		} else {
@@ -215,6 +224,18 @@ var startCmd = &cobra.Command{
 		cfg, err := config.Load(cfgFile)
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
+		}
+
+		// Override with CLI flags
+		if hostnameFlag != "" {
+			cfg.Gateway.Hostname = hostnameFlag
+		}
+		if len(interfacesFlag) > 0 {
+			// Validate interfaces exist
+			if err := network.ValidateInterfaces(interfacesFlag); err != nil {
+				return fmt.Errorf("invalid interface: %w", err)
+			}
+			cfg.Network.Interfaces = interfacesFlag
 		}
 
 		if dev {
@@ -254,6 +275,11 @@ var startCmd = &cobra.Command{
 		}
 		fmt.Println()
 
+		// Show interfaces if specified
+		if len(cfg.Network.Interfaces) > 0 {
+			fmt.Printf("   Ifaces:  %v\n", cfg.Network.Interfaces)
+		}
+
 		fmt.Printf("   mDNS:    %s on port %d\n", cfg.Network.ServiceName, cfg.Network.Port)
 		if withDemoPlugins {
 			fmt.Println("   Plugins: attendance, echo (demo)")
@@ -271,6 +297,8 @@ var startCmd = &cobra.Command{
 func init() {
 	startCmd.Flags().Bool("dev", false, "start in development mode")
 	startCmd.Flags().Bool("demo-plugins", false, "load demo plugins (attendance, echo)")
+	startCmd.Flags().StringP("hostname", "H", "", "gateway hostname for .local URL (e.g., 'myuni' → myuni.local)")
+	startCmd.Flags().StringSliceP("interfaces", "i", nil, "network interfaces to use (e.g., wlan0,eth0)")
 }
 
 // registerDemoPlugins registers built-in demo plugins
