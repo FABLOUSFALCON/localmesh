@@ -5,6 +5,177 @@
 
 ---
 
+## 🚀 NEXT PHASE: Dynamic mDNS Hostname Assignment
+
+### Core Feature: Register Any Service with a Friendly URL
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              THE VISION                                      │
+│                                                                              │
+│   Developer starts Next.js:     $ npm run dev -- --port 3000                │
+│                                                                              │
+│   Developer registers:          $ localmesh register myapp --port 3000      │
+│                                                                              │
+│   LocalMesh:                                                                 │
+│     ✓ Checks if "myapp" is available                                        │
+│     ✓ Gets developer's IP automatically                                     │
+│     ✓ Registers myapp.campus.local → 192.168.1.50:3000                     │
+│     ✓ Advertises via mDNS (Avahi)                                          │
+│                                                                              │
+│   Any user on WiFi opens:       http://myapp.campus.local:3000              │
+│                                 ✅ Works on Android Chrome!                 │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Priority Features (In Order)
+
+#### 1. Network Interface Selection
+```
+$ localmesh start
+
+🔍 Available network interfaces:
+   [1] lo        - 127.0.0.1 (loopback)
+   [2] wlan0     - 192.168.1.50 (WiFi)
+   [3] eth0      - 10.0.0.5 (Ethernet)
+   [4] docker0   - 172.17.0.1 (Docker)
+
+? Select interfaces for LocalMesh (comma-separated): 2,3
+✅ LocalMesh will operate on: wlan0, eth0
+```
+
+**Configuration options:**
+- CLI flag: `--interfaces wlan0,eth0`
+- Config YAML: `interfaces: [wlan0, eth0]`
+- Environment: `LOCALMESH_INTERFACES=wlan0,eth0`
+- TUI: Interactive selection
+
+#### 2. Configurable Gateway Hostname
+```yaml
+# localmesh.yaml
+gateway:
+  hostname: campus     # becomes campus.local
+  # OR
+  hostname: myschool   # becomes myschool.local
+```
+
+**All config methods:**
+- CLI: `localmesh start --hostname myschool`
+- Env: `LOCALMESH_HOSTNAME=myschool`
+- YAML: `gateway.hostname: myschool`
+- TUI: Settings panel
+
+#### 3. Service Registration Commands
+```bash
+# Register a service
+$ localmesh register myapp --port 3000
+✅ Registered: http://myapp.campus.local:3000
+
+# List registered services
+$ localmesh services
+NAME      PORT   URL                           STATUS
+myapp     3000   http://myapp.campus.local     ✅ healthy
+lecture   8080   http://lecture.campus.local   ✅ healthy
+
+# Unregister
+$ localmesh unregister myapp
+✅ Unregistered: myapp
+```
+
+#### 4. TUI Enhancements (Using Bubbles Components)
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LocalMesh Dashboard                                          campus.local  │
+├───────────────────┬─────────────────────────────────────────────────────────┤
+│                   │                                                         │
+│ [Services]        │  📦 Register New Service                               │
+│  Network          │  ─────────────────────────────                         │
+│  Logs             │                                                         │
+│  Settings    ←    │  Service Name: [myapp____________]                     │
+│                   │  Port:         [3000______________]                     │
+│                   │  Description:  [My Next.js App____]                     │
+│                   │                                                         │
+│                   │  Interfaces:                                            │
+│                   │  [✓] wlan0 (192.168.1.50)                              │
+│                   │  [ ] eth0  (10.0.0.5)                                  │
+│                   │                                                         │
+│                   │  [Register Service]   [Cancel]                         │
+│                   │                                                         │
+├───────────────────┴─────────────────────────────────────────────────────────┤
+│ Status: Ready │ Services: 3 │ Nodes: 2 │ wlan0: 192.168.1.50              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Bubbles components to use:**
+- `textinput` - Form fields
+- `list` - Service/interface selection  
+- `table` - Service listings
+- `spinner` - Loading states
+- `progress` - Health checks
+- `help` - Keyboard shortcuts (we have this!)
+- `viewport` - Scrollable logs
+
+#### 5. Easy Onboarding for Any Framework
+```bash
+# Works with ANY tech stack:
+
+# Next.js
+$ npm run dev -- --port 3000
+$ localmesh register frontend --port 3000
+
+# Python Flask
+$ flask run --port 5000
+$ localmesh register api --port 5000
+
+# Go server
+$ go run main.go  # listening on :8080
+$ localmesh register backend --port 8080
+
+# Static files
+$ python -m http.server 9000
+$ localmesh register docs --port 9000
+```
+
+### Implementation Checklist
+
+- [ ] **Interface Selection**
+  - [ ] Detect available network interfaces
+  - [ ] CLI flag `--interfaces`
+  - [ ] YAML config `interfaces: []`
+  - [ ] TUI interactive picker
+  - [ ] Validate interface exists and is up
+
+- [ ] **Hostname Configuration**  
+  - [ ] CLI flag `--hostname`
+  - [ ] Env var `LOCALMESH_HOSTNAME`
+  - [ ] YAML config `gateway.hostname`
+  - [ ] TUI settings panel
+  - [ ] Validate hostname (no special chars)
+
+- [ ] **Service Registration**
+  - [ ] `localmesh register <name> --port <port>` command
+  - [ ] `localmesh unregister <name>` command
+  - [ ] `localmesh services` list command
+  - [ ] Hostname availability check
+  - [ ] Avahi integration for each service
+  - [ ] Health monitoring for registered services
+  - [ ] Auto-cleanup on disconnect
+
+- [ ] **TUI Improvements**
+  - [ ] Service registration form
+  - [ ] Interface selection checkboxes
+  - [ ] Settings panel for hostname
+  - [ ] Real-time service status
+  - [ ] Use more Bubbles components
+
+- [ ] **CLI/TUI Feature Parity**
+  - [ ] Every CLI command available in TUI
+  - [ ] Every TUI action available in CLI
+  - [ ] Consistent behavior across both
+
+---
+
 ## 🎯 Vision
 
 Build a **production-grade framework** that enables universities, enterprises, and large campuses to run secure, local-only services where:
