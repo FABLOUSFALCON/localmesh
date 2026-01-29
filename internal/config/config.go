@@ -20,6 +20,7 @@ type Config struct {
 	Storage  StorageConfig   `mapstructure:"storage"`
 	Security SecurityConfig  `mapstructure:"security"`
 	Gateway  GatewayConfig   `mapstructure:"gateway"`
+	GRPC     GRPCConfig      `mapstructure:"grpc"`
 	Sync     SyncConfig      `mapstructure:"sync"`
 	Log      LogConfig       `mapstructure:"log"`
 	Zones    []ZoneConfig    `mapstructure:"zones"`
@@ -106,6 +107,13 @@ type GatewayConfig struct {
 	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
 	MaxBodySize  int64         `mapstructure:"max_body_size"`
 	CORSOrigins  []string      `mapstructure:"cors_origins"`
+}
+
+// GRPCConfig for agent gRPC server
+type GRPCConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Host    string `mapstructure:"host"`
+	Port    int    `mapstructure:"port"`
 }
 
 // SyncConfig for cloud backup
@@ -222,6 +230,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("gateway.max_body_size", 10485760)
 	v.SetDefault("gateway.cors_origins", []string{"*"})
 
+	v.SetDefault("grpc.enabled", true)
+	v.SetDefault("grpc.host", "0.0.0.0")
+	v.SetDefault("grpc.port", 9000)
+
 	v.SetDefault("sync.enabled", false)
 	v.SetDefault("sync.provider", "local")
 	v.SetDefault("sync.sync_interval", "5m")
@@ -259,6 +271,9 @@ func (c *Config) validate() error {
 	if c.Gateway.Port < 1 || c.Gateway.Port > 65535 {
 		return fmt.Errorf("invalid gateway port: %d", c.Gateway.Port)
 	}
+	if c.GRPC.Enabled && (c.GRPC.Port < 1 || c.GRPC.Port > 65535) {
+		return fmt.Errorf("invalid grpc port: %d", c.GRPC.Port)
+	}
 
 	return nil
 }
@@ -275,6 +290,11 @@ func expandPath(path string) string {
 // GatewayAddr returns the gateway listen address
 func (c *Config) GatewayAddr() string {
 	return fmt.Sprintf("%s:%d", c.Gateway.Host, c.Gateway.Port)
+}
+
+// GRPCAddr returns the gRPC server listen address
+func (c *Config) GRPCAddr() string {
+	return fmt.Sprintf("%s:%d", c.GRPC.Host, c.GRPC.Port)
 }
 
 // NetworkAddr returns the mDNS listen address

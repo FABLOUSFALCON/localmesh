@@ -98,12 +98,10 @@ func (s *AgentServer) Register(ctx context.Context, req *agentv1.RegisterRequest
 
 	// Register with mDNS if we have a registry
 	if s.registry != nil {
-		err := s.registry.Register(registry.MDNSRegisterOptions{
-			Name:     req.Name,
-			Port:     int(req.Port),
-			Protocol: "tcp",
-			TTL:      5 * time.Minute,
-			Metadata: req.Metadata,
+		_, err := s.registry.Register(req.Name, int(req.Port), registry.MDNSRegisterOptions{
+			IP:          req.Ip,
+			Description: req.Description,
+			HealthPath:  req.HealthPath,
 		})
 		if err != nil {
 			return &agentv1.RegisterResponse{

@@ -18,6 +18,7 @@ import (
 	"github.com/FABLOUSFALCON/localmesh/internal/auth"
 	"github.com/FABLOUSFALCON/localmesh/internal/config"
 	"github.com/FABLOUSFALCON/localmesh/internal/gateway"
+	localgrpc "github.com/FABLOUSFALCON/localmesh/internal/grpc"
 	"github.com/FABLOUSFALCON/localmesh/internal/mesh"
 	"github.com/FABLOUSFALCON/localmesh/internal/network"
 	"github.com/FABLOUSFALCON/localmesh/internal/plugins"
@@ -36,6 +37,7 @@ type Framework struct {
 	gateway   *gateway.Gateway
 	hostname  *gateway.HostnameAdvertiser
 	dns       *gateway.DNSServer
+	grpc      *localgrpc.Server
 	auth      *auth.Service
 	network   *network.Service
 	plugins   *plugins.Loader
@@ -141,7 +143,12 @@ func (f *Framework) Start() error {
 		return fmt.Errorf("initializing gateway: %w", err)
 	}
 
-	// 7. Start plugins (after gateway is ready)
+	// 7. Initialize gRPC server (for agent communication)
+	if err := f.initGRPC(); err != nil {
+		return fmt.Errorf("initializing grpc: %w", err)
+	}
+
+	// 8. Start plugins (after gateway is ready)
 	if err := f.plugins.Start(f.ctx); err != nil {
 		return fmt.Errorf("starting plugins: %w", err)
 	}
@@ -150,8 +157,14 @@ func (f *Framework) Start() error {
 	f.running = true
 	f.mu.Unlock()
 
+	grpcInfo := "disabled"
+	if f.config.GRPC.Enabled {
+		grpcInfo = f.config.GRPCAddr()
+	}
+
 	f.logger.Info("LocalMesh started successfully",
 		"gateway", f.config.GatewayAddr(),
+		"grpc", grpcInfo,
 		"services", f.registry.Count(),
 		"plugins", len(f.plugins.List()),
 	)
@@ -423,6 +436,41 @@ func (f *Framework) initDNSServer() {
 	)
 }
 
+// initGRPC sets up the gRPC server for agent communication
+func (f *Framework) initGRPC() error {
+	if !f.config.GRPC.Enabled {
+		f.logger.Debug("gRPC server disabled")
+		return nil
+	}
+
+	realm := f.config.Gateway.Hostname
+	if realm == "" {
+		realm = "campus"
+	}
+
+	server, err := localgrpc.NewServer(
+		f.config.GRPC.Port,
+		localgrpc.WithRealm(realm),
+	)
+	if err != nil {
+		return fmt.Errorf("creating gRPC server: %w", err)
+	}
+
+	f.grpc = server
+
+	// Start gRPC server in background
+	go func() {
+		f.logger.Info("gRPC server starting",
+			"addr", f.config.GRPCAddr(),
+		)
+		if err := f.grpc.Start(); err != nil {
+			f.logger.Error("gRPC server error", "error", err)
+		}
+	}()
+
+	return nil
+}
+
 // initExternalServices registers external services from config
 func (f *Framework) initExternalServices() error {
 	if len(f.config.Services) == 0 {
@@ -501,6 +549,10 @@ func (f *Framework) Stop() error {
 	}
 
 	// Stop components in reverse order
+	if f.grpc != nil {
+		f.grpc.Stop()
+	}
+
 	if f.dns != nil {
 		f.dns.Stop()
 	}
