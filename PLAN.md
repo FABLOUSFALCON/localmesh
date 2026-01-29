@@ -176,7 +176,343 @@ $ localmesh register docs --port 9000
 
 ---
 
-## 🎯 Vision
+## � PHASE 2: Federated LocalMesh Architecture
+
+### The Vision: Campus-Wide Mesh Network
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│                          CAMPUS LOCAL MESH (300 acres)                       │
+│                                                                              │
+│    ┌─────────────────────────────────────────────────────────────────────┐  │
+│    │                        Global Admin Realm                           │  │
+│    │                     campus.local (super admin)                      │  │
+│    └─────────────────────────────────────────────────────────────────────┘  │
+│                    │                    │                    │              │
+│         ┌─────────┴─────────┐          │          ┌─────────┴─────────┐    │
+│         ▼         gRPC      ▼          ▼          ▼       gRPC        ▼    │
+│    ┌─────────┐         ┌─────────┐         ┌─────────┐         ┌─────────┐ │
+│    │   CSE   │◄───────►│  Civil  │◄───────►│  Mech   │◄───────►│  Admin  │ │
+│    │ Realm   │ federate│  Realm  │ federate│  Realm  │ federate│  Realm  │ │
+│    │         │         │         │         │         │         │         │ │
+│    │cse.     │         │civil.   │         │mech.    │         │admin.   │ │
+│    │campus.  │         │campus.  │         │campus.  │         │campus.  │ │
+│    │local    │         │local    │         │local    │         │local    │ │
+│    └────┬────┘         └────┬────┘         └────┬────┘         └────┬────┘ │
+│         │                   │                   │                   │      │
+│    ┌────┴────┐         ┌────┴────┐         ┌────┴────┐         ┌────┴────┐ │
+│    │ Router  │         │ Router  │         │ Router  │         │ Router  │ │
+│    │CSE WiFi │         │Civil WiFi│        │Mech WiFi│         │Admin WiFi││
+│    └────┬────┘         └────┬────┘         └────┬────┘         └────┬────┘ │
+│         │                   │                   │                   │      │
+│    ┌────┴────┐         ┌────┴────┐         ┌────┴────┐         ┌────┴────┐ │
+│    │Services │         │Services │         │Services │         │Services │ │
+│    │lecture. │         │lab.     │         │workshop.│         │portal.  │ │
+│    │cse...   │         │civil... │         │mech...  │         │admin... │ │
+│    └─────────┘         └─────────┘         └─────────┘         └─────────┘ │
+│                                                                              │
+│   Access: Student on CSE WiFi opens mech.campus.local/workshop              │
+│           CSE LocalMesh → (gRPC) → Mech LocalMesh → Workshop Service        │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Two Binaries: Server + Agent
+
+We split LocalMesh into **two separate binaries** for clean separation:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│   BINARY 1: localmesh (Server/Gateway)                                      │
+│   ─────────────────────────────────────                                      │
+│   • Runs on central server                                                  │
+│   • Manages the realm (CSE, Civil, etc.)                                    │
+│   • Handles mDNS/DNS for the network                                        │
+│   • Service registry & health monitoring                                    │
+│   • Federation with other realms (gRPC)                                     │
+│   • Auth, RBAC, zones                                                       │
+│   • TUI dashboard                                                           │
+│                                                                              │
+│   $ localmesh start --realm cse --hostname cse.campus                       │
+│                                                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   BINARY 2: localmesh-agent (Client/Agent)                                  │
+│   ─────────────────────────────────────────                                  │
+│   • Runs on developer/teacher machines                                      │
+│   • Registers services with the server                                      │
+│   • Lightweight, minimal dependencies                                       │
+│   • Communicates via gRPC                                                   │
+│   • Health reporting to server                                              │
+│   • Auto-reconnect on network changes                                       │
+│                                                                              │
+│   $ localmesh-agent register lecture --port 3000 --server cse.campus.local  │
+│   $ localmesh-agent status                                                  │
+│   $ localmesh-agent unregister lecture                                      │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### gRPC Communication
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            gRPC SERVICES                                     │
+│                                                                              │
+│   1. AgentService (Agent ↔ Server)                                          │
+│   ─────────────────────────────────                                          │
+│   service AgentService {                                                    │
+│     rpc Register(RegisterRequest) returns (RegisterResponse);              │
+│     rpc Unregister(UnregisterRequest) returns (UnregisterResponse);        │
+│     rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);           │
+│     rpc ListServices(ListRequest) returns (ListResponse);                  │
+│   }                                                                          │
+│                                                                              │
+│   2. FederationService (Server ↔ Server)                                    │
+│   ──────────────────────────────────────                                     │
+│   service FederationService {                                               │
+│     rpc SyncServices(SyncRequest) returns (SyncResponse);                  │
+│     rpc ResolveService(ResolveRequest) returns (ResolveResponse);          │
+│     rpc JoinFederation(JoinRequest) returns (JoinResponse);                │
+│     rpc LeaveFederation(LeaveRequest) returns (LeaveResponse);             │
+│     rpc ExchangeTrust(TrustRequest) returns (TrustResponse);               │
+│   }                                                                          │
+│                                                                              │
+│   3. AdminService (Admin operations)                                        │
+│   ──────────────────────────────────                                         │
+│   service AdminService {                                                    │
+│     rpc CreateRealm(RealmRequest) returns (RealmResponse);                 │
+│     rpc ManageRoles(RoleRequest) returns (RoleResponse);                   │
+│     rpc GetStats(StatsRequest) returns (StatsResponse);                    │
+│   }                                                                          │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Service Registration Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│   Teacher's Laptop                     CSE Server                           │
+│   ─────────────────                    ──────────                           │
+│                                                                              │
+│   1. Start Next.js                                                          │
+│      $ npm run dev -- --port 3000                                           │
+│                                                                              │
+│   2. Run agent                                                              │
+│      $ localmesh-agent register \                                           │
+│          --name lecture \                                                   │
+│          --port 3000 \                                                      │
+│          --server cse.campus.local:9000                                     │
+│                                                                              │
+│      ┌──────────────┐     gRPC: Register       ┌──────────────┐            │
+│      │              │ ──────────────────────►  │              │            │
+│      │   Agent      │  name: lecture           │   Server     │            │
+│      │              │  port: 3000              │              │            │
+│      │  IP: .50     │  ip: 192.168.1.50        │  Checks:     │            │
+│      │              │                          │  - Auth OK?  │            │
+│      │              │ ◄──────────────────────  │  - Name free?│            │
+│      │              │  RegisterResponse        │  - Zone OK?  │            │
+│      │              │  success: true           │              │            │
+│      │              │  url: lecture.cse...     │  Registers:  │            │
+│      └──────────────┘                          │  - mDNS      │            │
+│                                                │  - Registry  │            │
+│   3. Agent keeps heartbeat                     └──────────────┘            │
+│      (every 30s via gRPC)                                                   │
+│                                                                              │
+│   4. Students access:                                                       │
+│      http://lecture.cse.campus.local:3000                                   │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Cross-Realm Access Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│   Student on CSE WiFi wants to access Civil's lab-booking service          │
+│                                                                              │
+│   Browser: http://lab.civil.campus.local                                    │
+│                                                                              │
+│   ┌─────────────┐                                      ┌─────────────┐     │
+│   │   Student   │                                      │   Civil     │     │
+│   │   Browser   │                                      │   Server    │     │
+│   └──────┬──────┘                                      └──────┬──────┘     │
+│          │                                                    │            │
+│          │  1. DNS query: lab.civil.campus.local             │            │
+│          ▼                                                    │            │
+│   ┌─────────────┐                                             │            │
+│   │    CSE      │  2. "I don't have this service"            │            │
+│   │   Server    │                                             │            │
+│   │             │  3. gRPC: ResolveService("lab.civil...")   │            │
+│   │             │ ──────────────────────────────────────────► │            │
+│   │             │                                             │            │
+│   │             │ ◄────────────────────────────────────────── │            │
+│   │             │  4. Response: IP=192.168.2.50, Port=8080   │            │
+│   │             │                                             │            │
+│   │  5. Returns │                                             │            │
+│   │  IP to DNS  │                                             │            │
+│   └──────┬──────┘                                             │            │
+│          │                                                    │            │
+│          │  6. Direct connection (if routers allow)          │            │
+│          │     OR proxy through CSE server                    │            │
+│          ▼                                                    ▼            │
+│   ┌─────────────────────────────────────────────────────────────────┐     │
+│   │                    lab.civil.campus.local                        │     │
+│   │                    192.168.2.50:8080                             │     │
+│   └─────────────────────────────────────────────────────────────────┘     │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### WiFi-Based RBAC (Enhanced)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          WiFi-BASED AUTHORIZATION                            │
+│                                                                              │
+│   zones:                                                                    │
+│     - name: cse-faculty                                                     │
+│       ssids: ["CSE-Faculty", "CSE-Faculty-5G"]                             │
+│       default_role: teacher                                                 │
+│       permissions:                                                          │
+│         - service:register      # Can register services                    │
+│         - service:unregister    # Can remove services                      │
+│         - attendance:manage     # Can manage attendance                    │
+│         - realm:view            # Can view realm info                      │
+│                                                                              │
+│     - name: cse-students                                                    │
+│       ssids: ["CSE-Students", "CSE-Lab"]                                   │
+│       default_role: student                                                 │
+│       permissions:                                                          │
+│         - service:access        # Can access services                      │
+│         - attendance:mark       # Can mark own attendance                  │
+│         - lecture:view          # Can view lectures                        │
+│                                                                              │
+│     - name: cse-admin                                                       │
+│       ssids: ["CSE-Admin"]                                                  │
+│       default_role: admin                                                   │
+│       permissions:                                                          │
+│         - "*"                   # Full access to CSE realm                 │
+│                                                                              │
+│   trust:                                                                    │
+│     # CSE realm trusts Civil realm for cross-access                        │
+│     - realm: civil.campus.local                                            │
+│       permissions:                                                          │
+│         - service:access        # Civil users can access CSE services     │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### mDNS URL Hierarchy
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          URL STRUCTURE                                       │
+│                                                                              │
+│   Format: <service>.<realm>.<campus>.local                                  │
+│                                                                              │
+│   Examples:                                                                  │
+│   ─────────                                                                  │
+│   campus.local                    → Global dashboard                        │
+│   cse.campus.local                → CSE realm gateway                       │
+│   civil.campus.local              → Civil realm gateway                     │
+│                                                                              │
+│   lecture.cse.campus.local        → Lecture service in CSE                  │
+│   lab.civil.campus.local          → Lab booking in Civil                    │
+│   workshop.mech.campus.local      → Workshop in Mech                        │
+│                                                                              │
+│   For single-realm deployment:                                              │
+│   ─────────────────────────────                                              │
+│   campus.local                    → Gateway                                 │
+│   lecture.campus.local            → Lecture service                         │
+│   attendance.campus.local         → Attendance service                      │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Project Structure (Updated)
+
+```
+localmesh/
+├── cmd/
+│   ├── localmesh/              # Main server binary
+│   │   └── main.go
+│   │
+│   └── localmesh-agent/        # Agent binary (NEW)
+│       └── main.go
+│
+├── api/                         # gRPC definitions (NEW)
+│   └── proto/
+│       ├── agent.proto          # Agent ↔ Server
+│       ├── federation.proto     # Server ↔ Server
+│       └── admin.proto          # Admin operations
+│
+├── internal/
+│   ├── server/                  # Server-specific code
+│   │   ├── grpc_server.go       # gRPC server implementation
+│   │   ├── federation.go        # Federation logic
+│   │   └── realm.go             # Realm management
+│   │
+│   ├── agent/                   # Agent-specific code (NEW)
+│   │   ├── client.go            # gRPC client
+│   │   ├── register.go          # Service registration
+│   │   ├── heartbeat.go         # Health reporting
+│   │   └── config.go            # Agent config
+│   │
+│   ├── gateway/                 # HTTP gateway (existing)
+│   ├── auth/                    # Auth engine (existing)
+│   ├── mesh/                    # Mesh discovery (existing)
+│   └── ...
+│
+├── pkg/
+│   ├── sdk/                     # Plugin SDK (existing)
+│   └── grpc/                    # Generated gRPC code (NEW)
+│       ├── agent_grpc.pb.go
+│       ├── federation_grpc.pb.go
+│       └── admin_grpc.pb.go
+│
+└── ...
+```
+
+### Implementation Phases
+
+#### Phase 2.1: LocalMesh Agent (Single Network)
+- [ ] Create `cmd/localmesh-agent/` binary
+- [ ] Define `api/proto/agent.proto`
+- [ ] Implement gRPC server in localmesh
+- [ ] Implement gRPC client in agent
+- [ ] Agent commands: `register`, `unregister`, `status`, `list`
+- [ ] Server-side service management via gRPC
+- [ ] Health monitoring via heartbeat
+
+#### Phase 2.2: Federation (Multi-Network)
+- [ ] Define `api/proto/federation.proto`
+- [ ] Implement realm discovery
+- [ ] Service registry synchronization
+- [ ] Cross-realm service resolution
+- [ ] Trust relationship management
+- [ ] Token exchange between realms
+
+#### Phase 2.3: Enhanced RBAC
+- [ ] WiFi SSID → Role mapping
+- [ ] Permission-based access control
+- [ ] Cross-realm permissions
+- [ ] Audit logging
+
+#### Phase 2.4: Global Admin
+- [ ] Super-admin realm
+- [ ] Global dashboard
+- [ ] Cross-realm monitoring
+- [ ] Policy distribution
+
+---
+
+## �🎯 Vision
 
 Build a **production-grade framework** that enables universities, enterprises, and large campuses to run secure, local-only services where:
 
