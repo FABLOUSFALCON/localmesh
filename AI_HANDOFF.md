@@ -3,8 +3,8 @@
 > **READ THIS FIRST** - This document is designed for AI assistants (GitHub Copilot, Claude, etc.) to understand the LocalMesh project context when the user switches accounts or starts a new conversation.
 
 **Last Updated:** January 30, 2026  
-**Current Phase:** Phase 2.3 - Enhanced RBAC (COMPLETE)  
-**Project Maturity:** ~90% core complete, production-ready auth
+**Current Phase:** Phase 2.4 - Global Admin (COMPLETE)  
+**Project Maturity:** ~95% core complete, fully production-ready
 
 ---
 
@@ -307,11 +307,23 @@ The `aiSkills/` folder contains coding rules. **ALWAYS read these before writing
 - [ ] Persistent RBAC config in localmesh.yaml (future)
 - [ ] Audit logging for policy decisions (future)
 
-### Phase 3: Global Admin 🔜 NEXT
-- [ ] Super-admin realm for campus-wide management
-- [ ] Global dashboard aggregating all realms
-- [ ] Cross-realm monitoring and alerting
-- [ ] Policy distribution across realms
+### Phase 2.4: Global Admin ✅ COMPLETE
+- [x] GlobalAdmin server for multi-realm management
+- [x] Realm registration, status tracking, health monitoring
+- [x] Cross-realm service catalog aggregation
+- [x] Alert system with levels (info, warning, error, critical)
+- [x] Policy distribution with realm targeting
+- [x] RealmMonitor for automatic health checks via gRPC Ping
+- [x] Dashboard REST API (/api/admin/*)
+- [x] Admin CLI: `dashboard`, `realms`, `realm`, `services`, `alerts`, `policies`, `stats`
+- [ ] Real-time WebSocket updates (future)
+- [ ] Persistent admin state (future)
+
+### Phase 3: Production Hardening 🔜 NEXT
+- [ ] TLS/mTLS for all gRPC communication
+- [ ] Persistent storage for federation/admin state
+- [ ] Comprehensive unit and integration tests
+- [ ] Performance benchmarking
 
 ---
 
@@ -374,6 +386,30 @@ sudo ./build/localmesh start --dev
 # Check if a role has permission
 ./build/localmesh rbac check --role student --action service:access
 
+# === Global Admin Commands ===
+# View admin dashboard overview
+./build/localmesh admin dashboard
+
+# List all managed realms
+./build/localmesh admin realms
+
+# Show realm details
+./build/localmesh admin realm cse
+
+# List services across all realms
+./build/localmesh admin services
+./build/localmesh admin services --realm cse
+
+# View alerts
+./build/localmesh admin alerts
+./build/localmesh admin alerts --active
+
+# List policies
+./build/localmesh admin policies
+
+# View aggregated statistics
+./build/localmesh admin stats
+
 # Test mDNS resolution
 getent hosts campus.local
 curl http://campus.local:8080/health
@@ -383,7 +419,7 @@ dig @<WIFI_IP> campus.local +short
 ```
 
 ### Ports Used
-- **8080:** HTTP Gateway
+- **8080:** HTTP Gateway (+ Admin Dashboard API)
 - **9000:** gRPC (AgentService + FederationService)
 - **53:** DNS Server (bound to WiFi IP)
 - **5353:** mDNS (via Avahi daemon)
