@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package localmesh.agent.v1;
+
+option go_package = "github.com/FABLOUSFALCON/localmesh/api/gen/agent/v1;agentv1";
+
+// AgentService handles communication between localmesh-agent and localmesh server.
+// Agents use this to register services and maintain their registration.
+service AgentService {
+  // Register registers a new service with the LocalMesh server.
+  // The server will assign a hostname and start advertising via mDNS.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Unregister removes a service registration.
+  // The server will stop the mDNS advertisement.
+  rpc Unregister(UnregisterRequest) returns (UnregisterResponse);
+
+  // Heartbeat keeps the registration alive and reports health status.
+  // Should be called every 30 seconds.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // ListServices returns all services registered by this agent.
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+
+  // GetServiceStatus returns the status of a specific service.
+  rpc GetServiceStatus(GetServiceStatusRequest) returns (GetServiceStatusResponse);
+}
+
+// RegisterRequest contains the service registration details.
+message RegisterRequest {
+  // Name of the service (becomes the hostname prefix).
+  // Must be alphanumeric with hyphens, 1-63 characters.
+  string name = 1;
+
+  // Port the service is running on.
+  int32 port = 2;
+
+  // IP address of the service (auto-detected if empty).
+  string ip = 3;
+
+  // Optional description of the service.
+  string description = 4;
+
+  // Health check endpoint path (e.g., "/health").
+  string health_path = 5;
+
+  // Tags for categorization.
+  repeated string tags = 6;
+
+  // Metadata key-value pairs.
+  map<string, string> metadata = 7;
+}
+
+// RegisterResponse contains the registration result.
+message RegisterResponse {
+  // Whether registration was successful.
+  bool success = 1;
+
+  // Error message if not successful.
+  string error = 2;
+
+  // The assigned hostname (e.g., "myapp.campus.local").
+  string hostname = 3;
+
+  // The full URL to access the service.
+  string url = 4;
+
+  // Unique registration ID.
+  string registration_id = 5;
+
+  // Recommended heartbeat interval in seconds.
+  int32 heartbeat_interval = 6;
+}
+
+// UnregisterRequest identifies the service to unregister.
+message UnregisterRequest {
+  // Name of the service to unregister.
+  string name = 1;
+
+  // Registration ID (optional, for verification).
+  string registration_id = 2;
+}
+
+// UnregisterResponse confirms the unregistration.
+message UnregisterResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// HeartbeatRequest reports the agent's status.
+message HeartbeatRequest {
+  // Name of the service.
+  string name = 1;
+
+  // Registration ID.
+  string registration_id = 2;
+
+  // Whether the service is healthy.
+  bool healthy = 3;
+
+  // Optional status message.
+  string status_message = 4;
+
+  // Current metrics (optional).
+  map<string, double> metrics = 5;
+}
+
+// HeartbeatResponse acknowledges the heartbeat.
+message HeartbeatResponse {
+  bool success = 1;
+  string error = 2;
+
+  // Whether the registration is still valid.
+  bool registration_valid = 3;
+
+  // Server timestamp for synchronization.
+  int64 server_time = 4;
+}
+
+// ListServicesRequest queries registered services.
+message ListServicesRequest {
+  // Filter by tags (optional).
+  repeated string tags = 1;
+}
+
+// ListServicesResponse contains the service list.
+message ListServicesResponse {
+  repeated ServiceInfo services = 1;
+}
+
+// GetServiceStatusRequest queries a specific service.
+message GetServiceStatusRequest {
+  string name = 1;
+}
+
+// GetServiceStatusResponse contains service details.
+message GetServiceStatusResponse {
+  ServiceInfo service = 1;
+}
+
+// ServiceInfo contains information about a registered service.
+message ServiceInfo {
+  string name = 1;
+  int32 port = 2;
+  string ip = 3;
+  string hostname = 4;
+  string url = 5;
+  string description = 6;
+  repeated string tags = 7;
+  bool healthy = 8;
+  int64 registered_at = 9;
+  int64 last_heartbeat = 10;
+  string registration_id = 11;
+}

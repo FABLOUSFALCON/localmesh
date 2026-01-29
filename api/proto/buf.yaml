@@ -1,0 +1,11 @@
+version: v1
+name: buf.build/localmesh/localmesh
+deps: []
+breaking:
+  use:
+    - FILE
+lint:
+  use:
+    - DEFAULT
+  except:
+    - PACKAGE_VERSION_SUFFIX
