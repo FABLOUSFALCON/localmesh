@@ -1,339 +1,200 @@
 package cmd
 
 import (
-	"context"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
-	"strings"
+	"sync"
 	"syscall"
 	"time"
 
-	"github.com/FABLOUSFALCON/localmesh/internal/client"
-	"github.com/google/uuid"
+	"github.com/hashicorp/mdns"
 	"github.com/spf13/cobra"
 )
 
 var (
-	versionStr = "dev"
-	commitStr  = "none"
-	dateStr    = "unknown"
-
-	// Global flags
-	serverAddr string
-	timeout    time.Duration
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
 )
 
-// SetVersionInfo sets version information from build flags
 func SetVersionInfo(version, commit, date string) {
-	versionStr = version
-	commitStr = commit
-	dateStr = date
+	Version = version
+	Commit = commit
+	Date = date
 }
 
-// rootCmd is the base command
+var serverAddr string
+
 var rootCmd = &cobra.Command{
 	Use:   "localmesh-agent",
-	Short: "LocalMesh Agent - Register services with LocalMesh",
-	Long: `LocalMesh Agent is a lightweight client for registering services
-with a LocalMesh server.
-
-Your service gets a friendly .local URL that works on any device:
-  localmesh-agent register myapp --port 3000
-  → Access at http://myapp.campus.local:3000
-
-The agent maintains a connection to the server and reports health status.`,
+	Short: "LocalMesh agent for service registration",
+	Long: `LocalMesh Agent is a lightweight client that registers local services
+with a LocalMesh server via mDNS advertising.`,
 }
 
-// Execute runs the root command
 func Execute() error {
 	return rootCmd.Execute()
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&serverAddr, "server", "s", "campus.local:9000",
-		"LocalMesh server address (host:port)")
-	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 10*time.Second,
-		"connection timeout")
+	rootCmd.PersistentFlags().StringVarP(&serverAddr, "server", "s", "", "LocalMesh server address (auto-discovered if not set)")
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(registerCmd)
 	rootCmd.AddCommand(unregisterCmd)
 	rootCmd.AddCommand(statusCmd)
-	rootCmd.AddCommand(listCmd)
 }
 
-// versionCmd shows version info
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("LocalMesh Agent %s\n", versionStr)
-		fmt.Printf("  Commit: %s\n", commitStr)
-		fmt.Printf("  Built:  %s\n", dateStr)
+		fmt.Printf("localmesh-agent %s\n", Version)
+		fmt.Printf("  Commit: %s\n", Commit)
+		fmt.Printf("  Built:  %s\n", Date)
 	},
 }
 
-// registerCmd registers a service with the server
 var registerCmd = &cobra.Command{
-	Use:   "register <name>",
+	Use:   "register [service-name]",
 	Short: "Register a service with LocalMesh",
-	Long: `Register a local service and get a .local hostname.
-
-The agent will:
-  1. Connect to the LocalMesh server
-  2. Request a hostname for your service
-  3. Keep the registration alive with heartbeats
-  4. Report health status to the server
-
-Examples:
-  localmesh-agent register myapp --port 3000
-  localmesh-agent register api --port 8080 --server myuni.local:9000
-  localmesh-agent register frontend --port 5173 --health /api/health`,
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
+		serviceName := args[0]
 		port, _ := cmd.Flags().GetInt("port")
-		healthPath, _ := cmd.Flags().GetString("health")
+		ip, _ := cmd.Flags().GetString("ip")
 		description, _ := cmd.Flags().GetString("description")
+		keepAlive, _ := cmd.Flags().GetBool("keep-alive")
 
-		if port == 0 {
+		if port <= 0 {
 			return fmt.Errorf("--port is required")
 		}
 
-		// Validate service name
-		if err := validateServiceName(name); err != nil {
+		// Auto-detect IP if not provided
+		if ip == "" {
+			detectedIP, err := getOutboundIP()
+			if err != nil {
+				return fmt.Errorf("failed to detect local IP: %w (use --ip to specify)", err)
+			}
+			ip = detectedIP
+		}
+
+		// Get server address
+		server, err := getServer()
+		if err != nil {
 			return err
 		}
 
-		fmt.Printf("📡 Connecting to LocalMesh server at %s...\n", serverAddr)
+		// Build request
+		reqBody := map[string]interface{}{
+			"name":        serviceName,
+			"port":        port,
+			"ip":          ip,
+			"description": description,
+		}
 
-		// Generate agent ID
-		agentID := fmt.Sprintf("agent-%s", uuid.New().String()[:8])
+		jsonBody, _ := json.Marshal(reqBody)
 
-		// Create gRPC client
-		grpcClient, err := client.New(client.Options{
-			ServerAddr: serverAddr,
-			AgentID:    agentID,
-			Timeout:    timeout,
-		})
+		// Register via HTTP
+		url := fmt.Sprintf("http://%s/api/v1/services/register", server)
+		resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonBody))
 		if err != nil {
-			fmt.Printf("⚠️  Could not connect to %s\n", serverAddr)
-			fmt.Println("   Make sure the LocalMesh server is running")
-			fmt.Println("   or specify --server with the correct address")
-			return fmt.Errorf("server connection failed: %w", err)
+			return fmt.Errorf("failed to register: %w", err)
 		}
-		defer grpcClient.Close()
+		defer resp.Body.Close()
 
-		// Get local IP
-		localIP, err := getLocalIP()
-		if err != nil {
-			return fmt.Errorf("failed to detect local IP: %w", err)
-		}
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
 
-		fmt.Printf("🔗 Registering service: %s\n", name)
-		fmt.Printf("   Port:        %d\n", port)
-		fmt.Printf("   Local IP:    %s\n", localIP)
-		if healthPath != "" {
-			fmt.Printf("   Health:      %s\n", healthPath)
-		}
-		if description != "" {
-			fmt.Printf("   Description: %s\n", description)
-		}
-
-		// Register the service
-		ctx := context.Background()
-		result, err := grpcClient.Register(ctx, client.RegisterOptions{
-			Name:           name,
-			Port:           int32(port),
-			IP:             localIP,
-			HealthEndpoint: healthPath,
-			Description:    description,
-		})
-		if err != nil {
-			return fmt.Errorf("registration failed: %w", err)
-		}
-
-		if !result.Success {
-			return fmt.Errorf("registration failed: %s", result.Error)
-		}
-
-		// Store registration ID for heartbeats and unregister
-		registrationID := result.RegistrationID
-
-		fmt.Println()
-		fmt.Println("✅ Service registered!")
-		fmt.Printf("   URL: http://%s:%d\n", result.Hostname, port)
-		fmt.Println()
-		fmt.Println("⏳ Keeping registration alive... (Ctrl+C to stop)")
-
-		// Wait for interrupt
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-		// Heartbeat loop
-		heartbeatInterval := 30 * time.Second
-		if result.HeartbeatInterval > 0 {
-			heartbeatInterval = time.Duration(result.HeartbeatInterval) * time.Second
-		}
-		ticker := time.NewTicker(heartbeatInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				// Send heartbeat via gRPC
-				hbResult, err := grpcClient.SendHeartbeat(ctx, name, registrationID, true, "")
-				if err != nil {
-					fmt.Printf("⚠️  Heartbeat failed: %v\n", err)
-					continue
-				}
-				if !hbResult.RegistrationValid {
-					fmt.Println("🔄 Registration expired, re-registering...")
-					// Re-register
-					newResult, err := grpcClient.Register(ctx, client.RegisterOptions{
-						Name:           name,
-						Port:           int32(port),
-						IP:             localIP,
-						HealthEndpoint: healthPath,
-						Description:    description,
-					})
-					if err != nil {
-						fmt.Printf("⚠️  Re-registration failed: %v\n", err)
-					} else {
-						registrationID = newResult.RegistrationID
-					}
-				}
-				fmt.Printf("💓 Heartbeat sent (%s)\n", time.Now().Format("15:04:05"))
-			case <-sigCh:
-				fmt.Println("\n🛑 Unregistering service...")
-				if err := grpcClient.Unregister(ctx, name, registrationID); err != nil {
-					fmt.Printf("⚠️  Unregister failed: %v\n", err)
-				}
-				fmt.Println("✅ Service unregistered")
-				return nil
+		if resp.StatusCode != http.StatusOK {
+			if errMsg, ok := result["error"].(string); ok {
+				return fmt.Errorf("registration failed: %s", errMsg)
 			}
+			return fmt.Errorf("registration failed: status %d", resp.StatusCode)
 		}
+
+		hostname := result["hostname"].(string)
+		svcURL := result["url"].(string)
+
+		fmt.Printf("✅ Service registered successfully!\n")
+		fmt.Printf("   Name:     %s\n", serviceName)
+		fmt.Printf("   Hostname: %s\n", hostname)
+		fmt.Printf("   URL:      %s\n", svcURL)
+		fmt.Printf("   IP:       %s\n", ip)
+		fmt.Printf("   Port:     %d\n", port)
+
+		if keepAlive {
+			fmt.Println("\n🔄 Keeping registration alive (Ctrl+C to stop)...")
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			<-sigCh
+			fmt.Println("\n⏹️  Stopping...")
+
+			// Unregister on exit
+			unregisterService(server, serviceName)
+		}
+
+		return nil
 	},
 }
 
-// unregisterCmd unregisters a service
 var unregisterCmd = &cobra.Command{
-	Use:   "unregister <name>",
+	Use:   "unregister [service-name]",
 	Short: "Unregister a service from LocalMesh",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
+		serviceName := args[0]
 
-		fmt.Printf("📡 Connecting to LocalMesh server at %s...\n", serverAddr)
-
-		grpcClient, err := client.New(client.Options{
-			ServerAddr: serverAddr,
-			AgentID:    "unregister-client",
-			Timeout:    timeout,
-		})
+		server, err := getServer()
 		if err != nil {
-			return fmt.Errorf("server connection failed: %w", err)
-		}
-		defer grpcClient.Close()
-
-		fmt.Printf("🛑 Unregistering service: %s\n", name)
-		if err := grpcClient.Unregister(context.Background(), name, ""); err != nil {
 			return err
 		}
-		fmt.Println("✅ Service unregistered")
 
+		if err := unregisterService(server, serviceName); err != nil {
+			return err
+		}
+
+		fmt.Printf("✅ Service %s unregistered\n", serviceName)
 		return nil
 	},
 }
 
-// statusCmd shows agent status
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show agent and registration status",
+	Short: "Show status of registered services",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("📊 LocalMesh Agent Status")
-		fmt.Println("─────────────────────────────────")
-		fmt.Printf("  Server:     %s\n", serverAddr)
-
-		// Try to connect to server
-		grpcClient, err := client.New(client.Options{
-			ServerAddr: serverAddr,
-			AgentID:    "status-client",
-			Timeout:    timeout,
-		})
+		server, err := getServer()
 		if err != nil {
-			fmt.Println("  Connection: ❌ Cannot reach server")
-			return nil
+			return err
 		}
-		defer grpcClient.Close()
-		fmt.Println("  Connection: ✅ Server reachable")
 
-		// Query registered services
-		services, err := grpcClient.ListServices(context.Background(), nil)
+		url := fmt.Sprintf("http://%s/api/v1/services", server)
+		resp, err := http.Get(url)
 		if err != nil {
-			fmt.Printf("  Services:   ⚠️  Error: %v\n", err)
+			return fmt.Errorf("failed to get services: %w", err)
+		}
+		defer resp.Body.Close()
+
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+
+		services, ok := result["services"].([]interface{})
+		if !ok || len(services) == 0 {
+			fmt.Println("No services registered")
 			return nil
 		}
 
-		fmt.Printf("  Services:   %d registered\n", len(services))
-
-		return nil
-	},
-}
-
-// listCmd lists registered services
-var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List services registered on the server",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		grpcClient, err := client.New(client.Options{
-			ServerAddr: serverAddr,
-			AgentID:    "list-client",
-			Timeout:    timeout,
-		})
-		if err != nil {
-			return fmt.Errorf("cannot connect to server: %w", err)
-		}
-		defer grpcClient.Close()
-
-		services, err := grpcClient.ListServices(context.Background(), nil)
-		if err != nil {
-			return fmt.Errorf("failed to list services: %w", err)
-		}
-
-		fmt.Println("📦 Registered Services")
-		fmt.Println("─────────────────────────────────────────────────")
-
-		if len(services) == 0 {
-			fmt.Println("  (no services registered)")
-			fmt.Println()
-			fmt.Println("  Register a service:")
-			fmt.Println("    localmesh-agent register myapp --port 3000")
-			return nil
-		}
-
+		fmt.Printf("Registered services (%d):\n", len(services))
 		for _, svc := range services {
-			statusIcon := "✅"
-			if !svc.Healthy {
-				statusIcon = "❌"
-			}
-			fmt.Printf("  %s %s\n", statusIcon, svc.Name)
-			if svc.URL != "" {
-				fmt.Printf("     URL:    %s\n", svc.URL)
-			} else {
-				fmt.Printf("     URL:    http://%s:%d\n", svc.Hostname, svc.Port)
-			}
-			if svc.Healthy {
-				fmt.Println("     Status: healthy")
-			} else {
-				fmt.Println("     Status: unhealthy")
-			}
-			if svc.Description != "" {
-				fmt.Printf("     Desc:   %s\n", svc.Description)
-			}
-			fmt.Println()
+			s := svc.(map[string]interface{})
+			fmt.Printf("  • %s\n", s["name"])
+			fmt.Printf("    URL:  %s\n", s["url"])
+			fmt.Printf("    IP:   %s:%v\n", s["ip"], s["port"])
 		}
 
 		return nil
@@ -341,74 +202,94 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	registerCmd.Flags().IntP("port", "p", 0, "port the service is running on (required)")
-	registerCmd.Flags().String("health", "", "health check endpoint path (e.g., /health)")
-	registerCmd.Flags().StringP("description", "d", "", "service description")
+	registerCmd.Flags().IntP("port", "p", 0, "Port the service runs on (required)")
+	registerCmd.Flags().String("ip", "", "IP address (auto-detected if not set)")
+	registerCmd.Flags().StringP("description", "d", "", "Service description")
+	registerCmd.Flags().Bool("keep-alive", false, "Keep running and unregister on exit")
 	registerCmd.MarkFlagRequired("port")
 }
 
-// validateServiceName checks if the name is valid for a hostname
-func validateServiceName(name string) error {
-	if name == "" {
-		return fmt.Errorf("service name cannot be empty")
-	}
-	if len(name) > 63 {
-		return fmt.Errorf("service name too long (max 63 characters)")
-	}
+func unregisterService(server, name string) error {
+	reqBody := map[string]string{"name": name}
+	jsonBody, _ := json.Marshal(reqBody)
 
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-			(c >= '0' && c <= '9') || c == '-') {
-			return fmt.Errorf("invalid character %q (only alphanumeric and hyphen allowed)", c)
+	url := fmt.Sprintf("http://%s/api/v1/services/unregister", server)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return fmt.Errorf("failed to unregister: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		if errMsg, ok := result["error"].(string); ok {
+			return fmt.Errorf("unregister failed: %s", errMsg)
 		}
-	}
-
-	if name[0] == '-' || name[len(name)-1] == '-' {
-		return fmt.Errorf("service name cannot start or end with hyphen")
+		return fmt.Errorf("unregister failed: status %d", resp.StatusCode)
 	}
 
 	return nil
 }
 
-// getLocalIP returns the local IP address
-func getLocalIP() (string, error) {
-	ifaces, err := net.Interfaces()
+func getServer() (string, error) {
+	if serverAddr != "" {
+		return serverAddr, nil
+	}
+
+	// Try to discover LocalMesh server via mDNS
+	server, err := discoverLocalMesh()
+	if err != nil {
+		return "", fmt.Errorf("could not find LocalMesh server: %w\nUse --server to specify address", err)
+	}
+
+	return server, nil
+}
+
+func discoverLocalMesh() (string, error) {
+	entriesCh := make(chan *mdns.ServiceEntry, 10)
+	var server string
+	var mu sync.Mutex
+	done := make(chan struct{})
+
+	go func() {
+		for entry := range entriesCh {
+			mu.Lock()
+			if server == "" && entry.Port > 0 && len(entry.AddrV4) > 0 {
+				server = fmt.Sprintf("%s:%d", entry.AddrV4, entry.Port)
+			}
+			mu.Unlock()
+		}
+		close(done)
+	}()
+
+	params := &mdns.QueryParam{
+		Service: "_localmesh._tcp",
+		Domain:  "local",
+		Timeout: 2 * time.Second,
+		Entries: entriesCh,
+	}
+
+	_ = mdns.Query(params)
+	close(entriesCh)
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if server == "" {
+		return "", fmt.Errorf("no LocalMesh server found")
+	}
+
+	return server, nil
+}
+
+func getOutboundIP() (string, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
 		return "", err
 	}
+	defer conn.Close()
 
-	for _, iface := range ifaces {
-		// Skip loopback and down interfaces
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-
-		// Skip virtual interfaces
-		name := strings.ToLower(iface.Name)
-		if strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "veth") ||
-			strings.HasPrefix(name, "br-") || strings.HasPrefix(name, "virbr") {
-			continue
-		}
-
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-
-			if ip != nil && ip.To4() != nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
-				return ip.String(), nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("no suitable IP address found")
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String(), nil
 }

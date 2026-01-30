@@ -98,7 +98,8 @@ type SecurityConfig struct {
 type GatewayConfig struct {
 	Host         string        `mapstructure:"host"`
 	Port         int           `mapstructure:"port"`
-	Hostname     string        `mapstructure:"hostname"` // .local hostname (e.g., "campus" → campus.local)
+	ProxyPort    int           `mapstructure:"proxy_port"` // Reverse proxy port (default 8081)
+	Hostname     string        `mapstructure:"hostname"`   // .local hostname (e.g., "campus" → campus.local)
 	TLSEnabled   bool          `mapstructure:"tls_enabled"`
 	CertFile     string        `mapstructure:"cert_file"`
 	KeyFile      string        `mapstructure:"key_file"`
