@@ -14,14 +14,14 @@ import (
 
 // RealmMonitor monitors the health and status of all managed realms.
 type RealmMonitor struct {
-	admin           *GlobalAdmin
-	checkInterval   time.Duration
-	timeout         time.Duration
-	logger          *slog.Logger
-	clients         map[string]*realmClient
-	mu              sync.RWMutex
-	stopCh          chan struct{}
-	wg              sync.WaitGroup
+	admin         *GlobalAdmin
+	checkInterval time.Duration
+	timeout       time.Duration
+	logger        *slog.Logger
+	clients       map[string]*realmClient
+	mu            sync.RWMutex
+	stopCh        chan struct{}
+	wg            sync.WaitGroup
 }
 
 type realmClient struct {
@@ -133,18 +133,17 @@ func (m *RealmMonitor) checkRealm(ctx context.Context, realm *RealmInfo) {
 		return
 	}
 
-	// Update realm status
+	// Update realm status based on response
 	status := RealmStatusOnline
-	if !resp.Healthy {
+	if resp.Status != "healthy" && resp.Status != "" {
 		status = RealmStatusDegraded
 	}
 
-	m.admin.UpdateRealmStatus(realm.ID, status, int(resp.ServiceCount), int(resp.PeerCount))
+	m.admin.UpdateRealmStatus(realm.ID, status, realm.ServiceCount, realm.PeerCount)
 
 	m.logger.Debug("realm health check",
 		"realm", realm.Name,
 		"status", status,
-		"services", resp.ServiceCount,
 		"latency_ms", time.Now().UnixMilli()-resp.Timestamp,
 	)
 }
@@ -224,9 +223,9 @@ func (m *RealmMonitor) SyncRealmServices(ctx context.Context, realm *RealmInfo) 
 	defer cancel()
 
 	resp, err := client.SyncServices(ctx, &federationv1.SyncRequest{
-		RealmId:   m.admin.RealmID(),
-		Services:  nil, // We're just requesting, not sending
-		Timestamp: time.Now().Unix(),
+		RealmId:  m.admin.RealmID(),
+		Services: nil, // We're just requesting, not sending
+		LastSync: time.Now().Unix(),
 	})
 
 	if err != nil {
