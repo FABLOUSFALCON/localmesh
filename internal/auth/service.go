@@ -198,6 +198,34 @@ func (s *Service) GetUserByUsername(ctx context.Context, username string) (*User
 	return s.users.GetByUsername(ctx, username)
 }
 
+func (s *Service) ListUsers(ctx context.Context, limit, offset int) ([]*User, error) {
+	return s.users.List(ctx, limit, offset)
+}
+
+func (s *Service) UpdateUser(ctx context.Context, user *User) error {
+	return s.users.Update(ctx, user)
+}
+
+func (s *Service) UpdatePassword(ctx context.Context, userID, newPassword string) error {
+	return s.users.UpdatePassword(ctx, userID, newPassword)
+}
+
+func (s *Service) DeleteUser(ctx context.Context, userID string) error {
+	// First, delete all sessions for this user
+	if err := s.sessions.DeleteAllForUser(userID); err != nil {
+		s.logger.Warn("failed to delete user sessions", "user_id", userID, "error", err)
+	}
+	return s.users.Delete(ctx, userID)
+}
+
+func (s *Service) UserCount(ctx context.Context) (int, error) {
+	return s.users.Count(ctx)
+}
+
+func (s *Service) UserExists(ctx context.Context, username string) (bool, error) {
+	return s.users.ExistsByUsername(ctx, username)
+}
+
 func (s *Service) RegisterZone(zone *Zone) error {
 	return s.zones.RegisterZone(zone)
 }

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -221,6 +223,19 @@ func (r *Registry) GetByName(name string) []*ServiceEntry {
 	return entries
 }
 
+// GetByNameAndZone finds a service by name and zone
+func (r *Registry) GetByNameAndZone(name, zone string) *ServiceEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, entry := range r.services {
+		if entry.Name == name && (zone == "" || entry.Zone == zone) {
+			return entry
+		}
+	}
+	return nil
+}
+
 // GetByZone finds services in a zone
 func (r *Registry) GetByZone(zone string) []*ServiceEntry {
 	r.mu.RLock()
@@ -320,11 +335,62 @@ func (r *Registry) checkAllHealth() {
 	}
 	r.mu.RUnlock()
 
-	for _, svc := range services {
-		// TODO: Implement actual HTTP health check
-		// For now, just mark as healthy
-		r.UpdateHealth(svc.ID, true)
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: r.healthCheckTimeout,
 	}
+
+	for _, svc := range services {
+		healthy := r.performHealthCheck(client, svc)
+		r.UpdateHealth(svc.ID, healthy)
+	}
+}
+
+// performHealthCheck checks a single service's health
+func (r *Registry) performHealthCheck(client *http.Client, svc *ServiceEntry) bool {
+	// Build health check URL
+	healthURL := svc.Endpoint
+	if svc.HealthEndpoint != "" {
+		// Append health endpoint path
+		if strings.HasSuffix(healthURL, "/") {
+			healthURL = healthURL[:len(healthURL)-1]
+		}
+		if !strings.HasPrefix(svc.HealthEndpoint, "/") {
+			healthURL += "/"
+		}
+		healthURL += svc.HealthEndpoint
+	} else {
+		// Default to /health
+		if strings.HasSuffix(healthURL, "/") {
+			healthURL += "health"
+		} else {
+			healthURL += "/health"
+		}
+	}
+
+	// Perform HTTP health check
+	resp, err := client.Get(healthURL)
+	if err != nil {
+		r.logger.Debug("health check failed",
+			"service", svc.Name,
+			"url", healthURL,
+			"error", err,
+		)
+		return false
+	}
+	defer resp.Body.Close()
+
+	// Consider 2xx status codes as healthy
+	healthy := resp.StatusCode >= 200 && resp.StatusCode < 300
+	if !healthy {
+		r.logger.Debug("health check returned unhealthy status",
+			"service", svc.Name,
+			"url", healthURL,
+			"status", resp.StatusCode,
+		)
+	}
+
+	return healthy
 }
 
 // persistService saves a service to SQLite

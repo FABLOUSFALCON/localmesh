@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/FABLOUSFALCON/localmesh/internal/auth"
 )
 
 // DashboardHandlers provides HTTP handlers for the admin dashboard.
@@ -20,24 +22,40 @@ func NewDashboardHandlers(admin *GlobalAdmin) *DashboardHandlers {
 // RegisterRoutes registers the dashboard routes on a mux.
 func (h *DashboardHandlers) RegisterRoutes(mux *http.ServeMux) {
 	// Dashboard overview
-	mux.HandleFunc("/api/admin/dashboard", h.handleDashboard)
-	mux.HandleFunc("/api/admin/stats", h.handleStats)
+	mux.HandleFunc("/api/admin/dashboard", h.requireAdmin(h.handleDashboard))
+	mux.HandleFunc("/api/admin/stats", h.requireAdmin(h.handleStats))
 
 	// Realm management
-	mux.HandleFunc("/api/admin/realms", h.handleRealms)
-	mux.HandleFunc("/api/admin/realm/", h.handleRealm)
+	mux.HandleFunc("/api/admin/realms", h.requireAdmin(h.handleRealms))
+	mux.HandleFunc("/api/admin/realm/", h.requireAdmin(h.handleRealm))
 
 	// Service overview
-	mux.HandleFunc("/api/admin/services", h.handleServices)
-	mux.HandleFunc("/api/admin/service/", h.handleService)
+	mux.HandleFunc("/api/admin/services", h.requireAdmin(h.handleServices))
+	mux.HandleFunc("/api/admin/service/", h.requireAdmin(h.handleService))
 
 	// Alerts
-	mux.HandleFunc("/api/admin/alerts", h.handleAlerts)
-	mux.HandleFunc("/api/admin/alert/", h.handleAlert)
+	mux.HandleFunc("/api/admin/alerts", h.requireAdmin(h.handleAlerts))
+	mux.HandleFunc("/api/admin/alert/", h.requireAdmin(h.handleAlert))
 
 	// Policies
-	mux.HandleFunc("/api/admin/policies", h.handlePolicies)
-	mux.HandleFunc("/api/admin/policy/", h.handlePolicy)
+	mux.HandleFunc("/api/admin/policies", h.requireAdmin(h.handlePolicies))
+	mux.HandleFunc("/api/admin/policy/", h.requireAdmin(h.handlePolicy))
+}
+
+// requireAdmin wraps a handler to require admin role
+func (h *DashboardHandlers) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims := auth.GetClaims(r.Context())
+		if claims == nil {
+			http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		if claims.Role != "admin" && claims.Role != "superadmin" {
+			http.Error(w, `{"error": "admin access required"}`, http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // DashboardResponse is the main dashboard response.

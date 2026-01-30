@@ -154,6 +154,67 @@ func (s *UserStore) List(ctx context.Context, limit, offset int) ([]*User, error
 	return users, nil
 }
 
+func (s *UserStore) Update(ctx context.Context, user *User) error {
+	user.UpdatedAt = time.Now()
+
+	_, err := s.sqlite.Exec(ctx, `
+		UPDATE users SET 
+			display_name = ?, 
+			email = ?, 
+			role = ?, 
+			zone = ?, 
+			updated_at = ?
+		WHERE id = ?
+	`, user.DisplayName, user.Email, user.Role, user.Zone, user.UpdatedAt, user.ID)
+
+	if err != nil {
+		return fmt.Errorf("updating user: %w", err)
+	}
+	return nil
+}
+
+func (s *UserStore) UpdatePassword(ctx context.Context, userID, newPassword string) error {
+	hash, err := HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("hashing password: %w", err)
+	}
+
+	_, err = s.sqlite.Exec(ctx, `
+		UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?
+	`, hash, time.Now(), userID)
+
+	if err != nil {
+		return fmt.Errorf("updating password: %w", err)
+	}
+	return nil
+}
+
+func (s *UserStore) Delete(ctx context.Context, userID string) error {
+	_, err := s.sqlite.Exec(ctx, `DELETE FROM users WHERE id = ?`, userID)
+	if err != nil {
+		return fmt.Errorf("deleting user: %w", err)
+	}
+	return nil
+}
+
+func (s *UserStore) Count(ctx context.Context) (int, error) {
+	row := s.sqlite.QueryRow(ctx, `SELECT COUNT(*) FROM users`)
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *UserStore) ExistsByUsername(ctx context.Context, username string) (bool, error) {
+	row := s.sqlite.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE username = ?`, username)
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, argon2SaltLen)
 	if _, err := rand.Read(salt); err != nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/FABLOUSFALCON/localmesh/internal/auth"
 	"github.com/FABLOUSFALCON/localmesh/internal/registry"
 	"github.com/FABLOUSFALCON/localmesh/internal/services"
+	"github.com/FABLOUSFALCON/localmesh/pkg/types"
 	"github.com/rs/zerolog"
 )
 
@@ -324,8 +325,96 @@ func (g *Gateway) handleGetService(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleRegisterService(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement service registration via API
-	g.jsonError(w, http.StatusNotImplemented, "use plugin SDK to register services")
+	var req struct {
+		Name           string            `json:"name"`
+		Version        string            `json:"version"`
+		Host           string            `json:"host"`
+		Port           int               `json:"port"`
+		Endpoint       string            `json:"endpoint"`
+		Zone           string            `json:"zone"`
+		HealthEndpoint string            `json:"health_endpoint"`
+		Metadata       map[string]string `json:"metadata"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		g.jsonError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Validate required fields
+	if req.Name == "" {
+		g.jsonError(w, http.StatusBadRequest, "service name is required")
+		return
+	}
+	if req.Port == 0 {
+		g.jsonError(w, http.StatusBadRequest, "service port is required")
+		return
+	}
+
+	// Get client IP if host not specified
+	if req.Host == "" {
+		req.Host = getClientIP(r)
+	}
+
+	// Build endpoint if not specified
+	if req.Endpoint == "" {
+		req.Endpoint = fmt.Sprintf("http://%s:%d", req.Host, req.Port)
+	}
+
+	// Default health endpoint
+	if req.HealthEndpoint == "" {
+		req.HealthEndpoint = "/health"
+	}
+
+	// Default version
+	if req.Version == "" {
+		req.Version = "1.0.0"
+	}
+
+	svc := types.Service{
+		Name:           req.Name,
+		Version:        req.Version,
+		Host:           req.Host,
+		Port:           req.Port,
+		Endpoint:       req.Endpoint,
+		Zone:           req.Zone,
+		HealthEndpoint: req.HealthEndpoint,
+		Metadata:       req.Metadata,
+		RegisteredAt:   time.Now(),
+		LastSeen:       time.Now(),
+		Status:         types.ServiceStatusHealthy,
+	}
+
+	// Check for naming conflicts
+	if existing := g.registry.GetByNameAndZone(req.Name, req.Zone); existing != nil {
+		// Same name exists - check if same host:port
+		if existing.Host == req.Host && existing.Port == req.Port {
+			// Re-registration - update existing
+			svc.ID = existing.ID
+		} else {
+			g.jsonError(w, http.StatusConflict, fmt.Sprintf("service '%s' already registered in zone '%s'", req.Name, req.Zone))
+			return
+		}
+	}
+
+	id, err := g.registry.Register(svc)
+	if err != nil {
+		g.jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	g.logger.Info("service registered via API",
+		"id", id,
+		"name", req.Name,
+		"endpoint", req.Endpoint,
+	)
+
+	g.jsonResponse(w, http.StatusCreated, map[string]interface{}{
+		"id":       id,
+		"name":     req.Name,
+		"endpoint": req.Endpoint,
+		"message":  "service registered successfully",
+	})
 }
 
 func (g *Gateway) handleDeregisterService(w http.ResponseWriter, r *http.Request) {
